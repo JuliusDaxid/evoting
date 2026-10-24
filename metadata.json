@@ -1,0 +1,6 @@
+{
+  "name": "eOSIS - Aplikasi Pemilihan OSIS",
+  "description": "Sistem Pemilihan Ketua dan Wakil Ketua OSIS Modern, Bersih, dan Terpercaya",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
