@@ -6,7 +6,12 @@ export const ProgramsTrackerView: React.FC = () => {
   const [programs, setPrograms] = useState<OsisProgram[]>([]);
   const [members, setMembers] = useState<OsisMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'calendar' | 'list'>('calendar');
+  const [calendarDate, setCalendarDate] = useState<Date>(() => {
+    // Default to current date or November 2026 if initial programs are in 2026
+    const now = new Date();
+    return now.getFullYear() >= 2026 ? now : new Date(2026, 10, 1);
+  });
   const [filterSekbid, setFilterSekbid] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -189,6 +194,95 @@ export const ProgramsTrackerView: React.FC = () => {
   const completed = filteredPrograms.filter((p) => p.status === 'selesai');
   const totalBudget = filteredPrograms.reduce((sum, p) => sum + (p.budget || 0), 0);
 
+  // Month names in Indonesian
+  const MONTH_NAMES_ID = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+
+  const currentYear = calendarDate.getFullYear();
+  const currentMonth = calendarDate.getMonth();
+
+  const handlePrevMonth = () => {
+    setCalendarDate(new Date(currentYear, currentMonth - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCalendarDate(new Date(currentYear, currentMonth + 1, 1));
+  };
+
+  const handleToday = () => {
+    setCalendarDate(new Date());
+  };
+
+  // Generate calendar days for monthly grid
+  const getDaysForMonth = () => {
+    const firstDay = new Date(currentYear, currentMonth, 1);
+    const lastDay = new Date(currentYear, currentMonth + 1, 0);
+    const totalDays = lastDay.getDate();
+
+    // Monday as first day (Mon=0, ..., Sun=6)
+    const startDayIndex = (firstDay.getDay() + 6) % 7;
+
+    const days: Array<{
+      dateStr: string;
+      dayNumber: number;
+      isCurrentMonth: boolean;
+      isToday: boolean;
+    }> = [];
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Previous month padding
+    const prevMonthDays = new Date(currentYear, currentMonth, 0).getDate();
+    for (let i = startDayIndex - 1; i >= 0; i--) {
+      const d = prevMonthDays - i;
+      const dObj = new Date(currentYear, currentMonth - 1, d);
+      const yearStr = dObj.getFullYear();
+      const monthStr = String(dObj.getMonth() + 1).padStart(2, '0');
+      const dayStr = String(d).padStart(2, '0');
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
+      days.push({
+        dateStr,
+        dayNumber: d,
+        isCurrentMonth: false,
+        isToday: dateStr === todayStr,
+      });
+    }
+
+    // Current month days
+    for (let d = 1; d <= totalDays; d++) {
+      const yearStr = currentYear;
+      const monthStr = String(currentMonth + 1).padStart(2, '0');
+      const dayStr = String(d).padStart(2, '0');
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
+      days.push({
+        dateStr,
+        dayNumber: d,
+        isCurrentMonth: true,
+        isToday: dateStr === todayStr,
+      });
+    }
+
+    // Next month padding to fill weeks (up to multiple of 7)
+    const remaining = (7 - (days.length % 7)) % 7;
+    for (let d = 1; d <= remaining; d++) {
+      const dObj = new Date(currentYear, currentMonth + 1, d);
+      const yearStr = dObj.getFullYear();
+      const monthStr = String(dObj.getMonth() + 1).padStart(2, '0');
+      const dayStr = String(d).padStart(2, '0');
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
+      days.push({
+        dateStr,
+        dayNumber: d,
+        isCurrentMonth: false,
+        isToday: dateStr === todayStr,
+      });
+    }
+
+    return days;
+  };
+
   const renderKanbanCard = (p: OsisProgram) => (
     <div
       key={p.id}
@@ -314,6 +408,15 @@ export const ProgramsTrackerView: React.FC = () => {
               <span className="hidden sm:inline">Papan Kanban</span>
             </button>
             <button
+              onClick={() => setViewMode('calendar')}
+              className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                viewMode === 'calendar' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <i className="bi bi-calendar3"></i>
+              <span>Kalender Proja</span>
+            </button>
+            <button
               onClick={() => setViewMode('list')}
               className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
                 viewMode === 'list' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
@@ -398,167 +501,386 @@ export const ProgramsTrackerView: React.FC = () => {
           <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
           Memuat data program kerja...
         </div>
-      ) : viewMode === 'kanban' ? (
-        /* KANBAN BOARD 3 COLUMNS */
-        <div className="grid md:grid-cols-3 gap-6">
-          {/* Column 1: Rencana */}
-          <div className="bg-slate-100/70 rounded-3xl p-4 border border-slate-200 flex flex-col space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-              <span className="font-extrabold text-xs text-amber-800 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                Rencana ({planned.length})
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold">Belum Dimulai</span>
-            </div>
-
-            <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
-              {planned.length === 0 ? (
-                <div className="p-6 text-center text-slate-400 text-xs">
-                  Tidak ada program kerja dalam rencana.
-                </div>
-              ) : (
-                planned.map((p) => renderKanbanCard(p))
-              )}
-            </div>
-          </div>
-
-          {/* Column 2: Sedang Berjalan */}
-          <div className="bg-slate-100/70 rounded-3xl p-4 border border-slate-200 flex flex-col space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-              <span className="font-extrabold text-xs text-blue-800 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
-                Sedang Berjalan ({inProgress.length})
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold">Tahap Eksekusi</span>
-            </div>
-
-            <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
-              {inProgress.length === 0 ? (
-                <div className="p-6 text-center text-slate-400 text-xs">
-                  Tidak ada program yang sedang berjalan.
-                </div>
-              ) : (
-                inProgress.map((p) => renderKanbanCard(p))
-              )}
-            </div>
-          </div>
-
-          {/* Column 3: Selesai */}
-          <div className="bg-slate-100/70 rounded-3xl p-4 border border-slate-200 flex flex-col space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-              <span className="font-extrabold text-xs text-emerald-800 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                Selesai ({completed.length})
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold">Tuntas (100%)</span>
-            </div>
-
-            <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
-              {completed.length === 0 ? (
-                <div className="p-6 text-center text-slate-400 text-xs">
-                  Belum ada program yang selesai.
-                </div>
-              ) : (
-                completed.map((p) => renderKanbanCard(p))
-              )}
-            </div>
-          </div>
-        </div>
       ) : (
-        /* LIST / TABLE VIEW */
-        <div className="bg-white rounded-3xl shadow-xs border border-slate-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4 w-12 text-center">No</th>
-                  <th className="py-3 px-4">Program Kerja</th>
-                  <th className="py-3 px-4">Sekbid</th>
-                  <th className="py-3 px-4">Penanggung Jawab (PJ)</th>
-                  <th className="py-3 px-4">Jadwal</th>
-                  <th className="py-3 px-4">Anggaran</th>
-                  <th className="py-3 px-4 text-center">Status &amp; Progres</th>
-                  <th className="py-3 px-4 text-center w-28">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredPrograms.map((p, idx) => (
-                  <tr key={p.id} className="hover:bg-slate-50/70 transition">
-                    <td className="py-3.5 px-4 text-center font-bold text-slate-400">
-                      {idx + 1}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <span className="font-extrabold text-slate-800 text-xs block">
-                        {p.title}
-                      </span>
-                      {p.description && (
-                        <span className="text-[11px] text-slate-500 line-clamp-1">
-                          {p.description}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-bold text-[10px] border border-blue-200">
-                        {p.sekbid}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 font-semibold text-slate-700">
-                      {p.pj_name}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-500 text-[11px]">
-                      {p.start_date} s/d {p.end_date}
-                    </td>
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-800">
-                      {formatRupiah(p.budget)}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <div className="inline-flex flex-col items-center">
+        <>
+          {/* 1. KANBAN BOARD 3 COLUMNS */}
+          {viewMode === 'kanban' && (
+            <div className="grid md:grid-cols-3 gap-6">
+              {/* Column 1: Rencana */}
+              <div className="bg-slate-100/70 rounded-3xl p-4 border border-slate-200 flex flex-col space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                  <span className="font-extrabold text-xs text-amber-800 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                    Rencana ({planned.length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold">Belum Dimulai</span>
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
+                  {planned.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 text-xs">
+                      Tidak ada program kerja dalam rencana.
+                    </div>
+                  ) : (
+                    planned.map((p) => renderKanbanCard(p))
+                  )}
+                </div>
+              </div>
+
+              {/* Column 2: Sedang Berjalan */}
+              <div className="bg-slate-100/70 rounded-3xl p-4 border border-slate-200 flex flex-col space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                  <span className="font-extrabold text-xs text-blue-800 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+                    Sedang Berjalan ({inProgress.length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold">Tahap Eksekusi</span>
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
+                  {inProgress.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 text-xs">
+                      Tidak ada program yang sedang berjalan.
+                    </div>
+                  ) : (
+                    inProgress.map((p) => renderKanbanCard(p))
+                  )}
+                </div>
+              </div>
+
+              {/* Column 3: Selesai */}
+              <div className="bg-slate-100/70 rounded-3xl p-4 border border-slate-200 flex flex-col space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                  <span className="font-extrabold text-xs text-emerald-800 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    Selesai ({completed.length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold">Tuntas (100%)</span>
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
+                  {completed.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 text-xs">
+                      Belum ada program yang selesai.
+                    </div>
+                  ) : (
+                    completed.map((p) => renderKanbanCard(p))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 2. INTERACTIVE CALENDAR VIEW */}
+          {viewMode === 'calendar' && (
+            <div className="bg-white rounded-3xl shadow-xs border border-slate-200 overflow-hidden space-y-0">
+              {/* Calendar Toolbar */}
+              <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/70">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center bg-white border border-slate-300 rounded-xl overflow-hidden shadow-xs">
+                    <button
+                      type="button"
+                      onClick={handlePrevMonth}
+                      className="p-2 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+                      title="Bulan Sebelumnya"
+                    >
+                      <i className="bi bi-chevron-left text-xs"></i>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleToday}
+                      className="px-3 py-1.5 text-xs font-bold hover:bg-slate-100 text-slate-700 border-x border-slate-200 transition cursor-pointer"
+                    >
+                      Bulan Ini
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextMonth}
+                      className="p-2 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+                      title="Bulan Berikutnya"
+                    >
+                      <i className="bi bi-chevron-right text-xs"></i>
+                    </button>
+                  </div>
+
+                  <h3 className="text-base sm:text-lg font-black text-slate-800">
+                    {MONTH_NAMES_ID[currentMonth]} {currentYear}
+                  </h3>
+                </div>
+
+                {/* Legend indicator */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold border border-amber-200 text-[11px]">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Rencana
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 font-bold border border-blue-200 text-[11px]">
+                    <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                    Sedang Berjalan
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 font-bold border border-emerald-200 text-[11px]">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Selesai
+                  </span>
+                </div>
+              </div>
+
+              {/* Day of Week Headers */}
+              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-100/90 text-center text-xs font-bold text-slate-600">
+                {['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map((d, i) => (
+                  <div key={d} className={`py-2.5 px-1 ${i >= 5 ? 'text-rose-600' : ''}`}>
+                    <span className="hidden sm:inline">{d}</span>
+                    <span className="sm:hidden">{d.slice(0, 3)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Monthly Grid */}
+              <div className="grid grid-cols-7 divide-x divide-y divide-slate-200 bg-slate-200">
+                {getDaysForMonth().map((cell, idx) => {
+                  const dayPrograms = filteredPrograms.filter(
+                    (p) => p.start_date <= cell.dateStr && p.end_date >= cell.dateStr
+                  );
+
+                  return (
+                    <div
+                      key={`day-${cell.dateStr}-${idx}`}
+                      className={`min-h-[110px] sm:min-h-[125px] p-1.5 sm:p-2 bg-white flex flex-col justify-between transition hover:bg-slate-50/80 ${
+                        !cell.isCurrentMonth ? 'bg-slate-50/50 text-slate-400' : ''
+                      }`}
+                    >
+                      {/* Day Header */}
+                      <div className="flex items-center justify-between mb-1">
                         <span
-                          className={`px-2 py-0.5 rounded-full font-bold text-[10px] border ${
-                            p.status === 'selesai'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                              : p.status === 'sedang_berjalan'
-                              ? 'bg-blue-50 text-blue-700 border-blue-300'
-                              : 'bg-amber-50 text-amber-700 border-amber-300'
+                          className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${
+                            cell.isToday
+                              ? 'bg-blue-600 text-white font-extrabold shadow-xs'
+                              : cell.isCurrentMonth
+                              ? 'text-slate-700'
+                              : 'text-slate-400'
                           }`}
                         >
-                          {p.status === 'selesai'
-                            ? 'Selesai'
-                            : p.status === 'sedang_berjalan'
-                            ? 'Sedang Berjalan'
-                            : 'Rencana'}
+                          {cell.dayNumber}
                         </span>
-                        <span className="text-[10px] text-slate-400 mt-0.5 font-bold">
-                          {p.progress}%
-                        </span>
+
+                        {cell.isCurrentMonth && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openAddModal();
+                              setStartDate(cell.dateStr);
+                              setEndDate(cell.dateStr);
+                            }}
+                            className="p-0.5 text-slate-400 hover:text-blue-600 transition rounded cursor-pointer"
+                            title={`Tambah Proja di tanggal ${cell.dateStr}`}
+                          >
+                            <i className="bi bi-plus text-xs"></i>
+                          </button>
+                        )}
                       </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          type="button"
+
+                      {/* Day Programs Pill */}
+                      <div className="space-y-1 overflow-y-auto max-h-[85px] pr-0.5">
+                        {dayPrograms.map((p) => {
+                          const isStart = p.start_date === cell.dateStr;
+                          const isEnd = p.end_date === cell.dateStr;
+
+                          let bgClass = 'bg-amber-100 text-amber-900 border-amber-300';
+                          if (p.status === 'sedang_berjalan') {
+                            bgClass = 'bg-blue-100 text-blue-900 border-blue-300';
+                          } else if (p.status === 'selesai') {
+                            bgClass = 'bg-emerald-100 text-emerald-900 border-emerald-300';
+                          }
+
+                          return (
+                            <button
+                              key={`pill-${p.id}-${cell.dateStr}`}
+                              type="button"
+                              onClick={() => openEditModal(p)}
+                              className={`w-full text-left p-1 rounded-md text-[10px] font-bold border transition truncate block hover:shadow-xs cursor-pointer ${bgClass}`}
+                              title={`${p.title} (${p.sekbid}) - ${
+                                p.status === 'selesai'
+                                  ? 'Selesai'
+                                  : p.status === 'sedang_berjalan'
+                                  ? 'Sedang Berjalan'
+                                  : 'Rencana'
+                              } - PJ: ${p.pj_name} (${p.start_date} s/d ${p.end_date})`}
+                            >
+                              <div className="flex items-center gap-1 truncate">
+                                {isStart && <span className="text-[9px]">▶</span>}
+                                <span className="truncate">{p.title}</span>
+                                {isEnd && <span className="text-[9px]">🏁</span>}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Monthly Overview Agenda List underneath the grid */}
+              <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200">
+                <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <i className="bi bi-calendar-check text-blue-600"></i>
+                  <span>Program Kerja Aktif di Bulan {MONTH_NAMES_ID[currentMonth]} {currentYear}</span>
+                </h4>
+
+                {filteredPrograms.filter((p) => {
+                  return (
+                    p.start_date <= `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-31` &&
+                    p.end_date >= `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`
+                  );
+                }).length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">
+                    Tidak ada agenda program kerja yang dijadwalkan pada bulan ini.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filteredPrograms
+                      .filter((p) => {
+                        return (
+                          p.start_date <= `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-31` &&
+                          p.end_date >= `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`
+                        );
+                      })
+                      .map((p) => (
+                        <div
+                          key={`agenda-${p.id}`}
                           onClick={() => openEditModal(p)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                          title="Edit"
+                          className="p-3 bg-white rounded-xl border border-slate-200 hover:border-blue-400 shadow-2xs hover:shadow-xs transition cursor-pointer space-y-1.5"
                         >
-                          <i className="bi bi-pencil-square"></i>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingProgram(p)}
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                          title="Hapus"
-                        >
-                          <i className="bi bi-trash3"></i>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 truncate">
+                              {p.sekbid}
+                            </span>
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                p.status === 'selesai'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : p.status === 'sedang_berjalan'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {p.status === 'selesai'
+                                ? 'Selesai'
+                                : p.status === 'sedang_berjalan'
+                                ? 'Sedang Berjalan'
+                                : 'Rencana'}
+                            </span>
+                          </div>
+                          <h5 className="text-xs font-bold text-slate-800 truncate">{p.title}</h5>
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>PJ: {p.pj_name}</span>
+                            <span className="font-mono text-[10px]">{p.start_date} s/d {p.end_date}</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. LIST / TABLE VIEW */}
+          {viewMode === 'list' && (
+            <div className="bg-white rounded-3xl shadow-xs border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4 w-12 text-center">No</th>
+                      <th className="py-3 px-4">Program Kerja</th>
+                      <th className="py-3 px-4">Sekbid</th>
+                      <th className="py-3 px-4">Penanggung Jawab (PJ)</th>
+                      <th className="py-3 px-4">Jadwal</th>
+                      <th className="py-3 px-4">Anggaran</th>
+                      <th className="py-3 px-4 text-center">Status &amp; Progres</th>
+                      <th className="py-3 px-4 text-center w-28">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredPrograms.map((p, idx) => (
+                      <tr key={p.id} className="hover:bg-slate-50/70 transition">
+                        <td className="py-3.5 px-4 text-center font-bold text-slate-400">
+                          {idx + 1}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="font-extrabold text-slate-800 text-xs block">
+                            {p.title}
+                          </span>
+                          {p.description && (
+                            <span className="text-[11px] text-slate-500 line-clamp-1">
+                              {p.description}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-bold text-[10px] border border-blue-200">
+                            {p.sekbid}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-slate-700">
+                          {p.pj_name}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-500 text-[11px]">
+                          {p.start_date} s/d {p.end_date}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-800">
+                          {formatRupiah(p.budget)}
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="inline-flex flex-col items-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-bold text-[10px] border ${
+                                p.status === 'selesai'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                  : p.status === 'sedang_berjalan'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-300'
+                                  : 'bg-amber-50 text-amber-700 border-amber-300'
+                              }`}
+                            >
+                              {p.status === 'selesai'
+                                ? 'Selesai'
+                                : p.status === 'sedang_berjalan'
+                                ? 'Sedang Berjalan'
+                                : 'Rencana'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 mt-0.5 font-bold">
+                              {p.progress}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(p)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                              title="Edit"
+                            >
+                              <i className="bi bi-pencil-square"></i>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingProgram(p)}
+                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Hapus"
+                            >
+                              <i className="bi bi-trash3"></i>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* ADD / EDIT PROJA MODAL */}

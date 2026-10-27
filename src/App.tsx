@@ -16,6 +16,7 @@ import { SettingsView } from './views/admin/SettingsView';
 import { OsisMembersView } from './views/admin/OsisMembersView';
 import { ProgramsTrackerView } from './views/admin/ProgramsTrackerView';
 import { AttendanceView } from './views/admin/AttendanceView';
+import { NotulenGeneratorView } from './views/admin/NotulenGeneratorView';
 import { DocumentsArchiveView } from './views/admin/DocumentsArchiveView';
 
 import { OFFICIAL_EOSIS_LOGO_SVG } from './components/EosisLogo';
@@ -191,6 +192,8 @@ export default function App() {
                 {adminMenu === 'proja' && <ProgramsTrackerView />}
 
                 {adminMenu === 'absensi' && <AttendanceView />}
+
+                {adminMenu === 'notulen' && <NotulenGeneratorView settings={settings} />}
 
                 {adminMenu === 'arsip' && <DocumentsArchiveView />}
 

@@ -14,6 +14,15 @@ export const StudentsManagement: React.FC = () => {
   const [voteFilter, setVoteFilter] = useState<'all' | 'voted' | 'not_voted'>('all');
   const [genderFilter, setGenderFilter] = useState<'all' | 'L' | 'P'>('all');
 
+  // Pagination states (Presets: 15, 30, 50, or custom input)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [rowsPerPage, setRowsPerPage] = useState<number>(15);
+  const [customRowsInput, setCustomRowsInput] = useState<string>('15');
+  const [showCustomInput, setShowCustomInput] = useState<boolean>(false);
+
+  // Toast notification for instant optimistic updates
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   // Manual CRUD Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -97,6 +106,16 @@ export const StudentsManagement: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Reset page when filter or rowsPerPage changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedClassId, searchQuery, voteFilter, genderFilter, rowsPerPage]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nisn.trim()) {
@@ -114,19 +133,59 @@ export const StudentsManagement: React.FC = () => {
 
     setSaving(true);
     setFormError(null);
+
+    const targetClassName = classes.find((c) => c.id === classId)?.name || (!classId ? 'Belum Ditentukan' : '');
+
     try {
       if (editingStudent) {
-        await dbService.updateStudent(editingStudent.id, {
+        // --- OPTIMISTIC UPDATE: Instant local state update without delay/refresh ---
+        const studentId = editingStudent.id;
+        const updatedStudent: Student = {
+          ...editingStudent,
           nisn: nisn.trim(),
           name: name.trim(),
           birth_date: birthDate,
           class_id: classId || undefined,
+          class_name: targetClassName || editingStudent.class_name || 'Belum Ditentukan',
           gender,
           religion,
           address: address.trim(),
-        });
+        };
+
+        const backupList = [...students];
+
+        // 1. Instantly update local state
+        setStudents((prev) =>
+          prev.map((s) => (s.id === studentId ? updatedStudent : s))
+        );
+
+        // 2. Instantly close modal & show feedback toast
+        setIsModalOpen(false);
+        setSaving(false);
+        showToast(`Data siswa "${updatedStudent.name}" berhasil diperbarui secara instan!`);
+
+        // 3. Asynchronously persist to database in background
+        dbService
+          .updateStudent(studentId, {
+            nisn: updatedStudent.nisn,
+            name: updatedStudent.name,
+            birth_date: updatedStudent.birth_date,
+            class_id: updatedStudent.class_id,
+            gender: updatedStudent.gender,
+            religion: updatedStudent.religion,
+            address: updatedStudent.address,
+          })
+          .catch((err) => {
+            console.error('Background student update failed', err);
+            // Rollback on failure
+            setStudents(backupList);
+            showToast(`Gagal memperbarui ke server: ${err instanceof Error ? err.message : 'Kesalahan'}`);
+          });
+
+        return;
       } else {
-        await dbService.createStudent({
+        // Create new student
+        const created = await dbService.createStudent({
           nisn: nisn.trim(),
           name: name.trim(),
           birth_date: birthDate,
@@ -135,13 +194,17 @@ export const StudentsManagement: React.FC = () => {
           religion,
           address: address.trim(),
         });
+
+        // Instant prepend to local state
+        setStudents((prev) => [created, ...prev]);
+        setIsModalOpen(false);
+        setSaving(false);
+        showToast(`Siswa baru "${created.name}" berhasil ditambahkan!`);
+        return;
       }
-      setIsModalOpen(false);
-      await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal menyimpan siswa';
       setFormError(msg);
-    } finally {
       setSaving(false);
     }
   };
@@ -364,8 +427,33 @@ export const StudentsManagement: React.FC = () => {
   const votedTotal = students.filter((s) => s.has_voted).length;
   const notVotedTotal = students.length - votedTotal;
 
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / rowsPerPage));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * rowsPerPage;
+  const endIndex = Math.min(startIndex + rowsPerPage, filteredStudents.length);
+  const paginatedStudents = filteredStudents.slice(startIndex, endIndex);
+
+  // Custom rows per page submit handler
+  const handleApplyCustomRows = () => {
+    const num = parseInt(customRowsInput, 10);
+    if (!isNaN(num) && num > 0) {
+      setRowsPerPage(num);
+      setCurrentPage(1);
+    } else {
+      setCustomRowsInput(String(rowsPerPage));
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Toast Notification for Instant Optimistic Updates */}
+      {toastMessage && (
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center gap-3 animate-fade-in">
+          <i className="bi bi-check-circle-fill text-emerald-400 text-base"></i>
+          <span>{toastMessage}</span>
+        </div>
+      )}
       {/* Top Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-xs border border-slate-200">
         <div>
@@ -517,7 +605,8 @@ export const StudentsManagement: React.FC = () => {
             <p className="text-xs font-medium">Tidak ada data siswa yang cocok dengan filter atau pencarian.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                 <tr>
@@ -534,10 +623,10 @@ export const StudentsManagement: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredStudents.map((s, idx) => (
+                {paginatedStudents.map((s, idx) => (
                   <tr key={s.id} className="hover:bg-slate-50/70 transition">
                     <td className="py-3 px-3 text-center font-bold text-slate-400">
-                      {idx + 1}
+                      {startIndex + idx + 1}
                     </td>
                     <td className="py-3 px-3 font-mono font-bold text-slate-700">
                       {s.nisn}
@@ -628,7 +717,180 @@ export const StudentsManagement: React.FC = () => {
               </tbody>
             </table>
           </div>
-        )}
+
+          {/* INTERACTIVE PAGINATION BAR */}
+          <div className="p-4 bg-slate-50/80 border-t border-slate-200 flex flex-col lg:flex-row items-center justify-between gap-4">
+            {/* Left: Rows Per Page Selector & Custom Input */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-slate-500 font-semibold flex items-center gap-1">
+                <i className="bi bi-list-ol text-slate-400"></i>
+                <span>Baris per halaman:</span>
+              </span>
+
+              {/* Presets */}
+              {[15, 30, 50].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => {
+                    setRowsPerPage(preset);
+                    setShowCustomInput(false);
+                    setCustomRowsInput(String(preset));
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                    rowsPerPage === preset && !showCustomInput
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+
+              {/* Tombol Opsi Kustom */}
+              <button
+                type="button"
+                onClick={() => setShowCustomInput(!showCustomInput)}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  showCustomInput || ![15, 30, 50].includes(rowsPerPage)
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                Kustom {![15, 30, 50].includes(rowsPerPage) ? `(${rowsPerPage})` : ''}
+              </button>
+
+              {/* Input Bebas Jumlah Baris */}
+              {showCustomInput && (
+                <div className="inline-flex items-center gap-1.5 ml-1 animate-fade-in">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={customRowsInput}
+                    onChange={(e) => setCustomRowsInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleApplyCustomRows();
+                    }}
+                    placeholder="Baris..."
+                    className="w-16 px-2 py-1 text-xs text-center font-bold bg-white border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyCustomRows}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition cursor-pointer"
+                  >
+                    Terapkan
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Center: Info Status Baris */}
+            <div className="text-xs text-slate-500 text-center">
+              Menampilkan <span className="font-extrabold text-slate-800">{filteredStudents.length === 0 ? 0 : startIndex + 1}</span> -{' '}
+              <span className="font-extrabold text-slate-800">{endIndex}</span> dari{' '}
+              <span className="font-extrabold text-slate-800">{filteredStudents.length}</span> siswa{' '}
+              <span className="text-slate-400 font-mono">(Halaman {safeCurrentPage} dari {totalPages})</span>
+            </div>
+
+            {/* Right: Page Navigation Buttons */}
+            <div className="flex items-center gap-1">
+              {/* Tombol Pertama (<<) */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={safeCurrentPage <= 1}
+                className="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition text-xs font-bold"
+                title="Halaman Pertama"
+              >
+                <i className="bi bi-chevron-double-left"></i>
+              </button>
+
+              {/* Tombol Sebelumnya (<) */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={safeCurrentPage <= 1}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition text-xs font-bold"
+                title="Halaman Sebelumnya"
+              >
+                <i className="bi bi-chevron-left"></i>
+                <span className="hidden sm:inline">Sebelumnya</span>
+              </button>
+
+              {/* Page Number Chips */}
+              <div className="flex items-center gap-1 mx-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => {
+                    if (totalPages <= 7) return true;
+                    if (p === 1 || p === totalPages) return true;
+                    return Math.abs(p - safeCurrentPage) <= 1;
+                  })
+                  .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && typeof arr[idx - 1] === 'number') {
+                      const prevPage = arr[idx - 1] as number;
+                      if (p - prevPage > 1) {
+                        acc.push('...');
+                      }
+                    }
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((item, idx) => {
+                    if (item === '...') {
+                      return (
+                        <span key={`dots-${idx}`} className="px-1 text-slate-400 font-bold text-xs">
+                          ...
+                        </span>
+                      );
+                    }
+                    const pageNum = item as number;
+                    const isActive = pageNum === safeCurrentPage;
+                    return (
+                      <button
+                        key={pageNum}
+                        type="button"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold transition cursor-pointer ${
+                          isActive
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {/* Tombol Selanjutnya (>) */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safeCurrentPage >= totalPages}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition text-xs font-bold"
+                title="Halaman Berikutnya"
+              >
+                <span className="hidden sm:inline">Berikutnya</span>
+                <i className="bi bi-chevron-right"></i>
+              </button>
+
+              {/* Tombol Terakhir (>>) */}
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={safeCurrentPage >= totalPages}
+                className="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition text-xs font-bold"
+                title="Halaman Terakhir"
+              >
+                <i className="bi bi-chevron-double-right"></i>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
       </div>
 
       {/* MODAL IMPORT EXCEL (SheetJS) */}

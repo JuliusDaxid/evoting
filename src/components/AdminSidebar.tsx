@@ -9,6 +9,7 @@ export type AdminMenuKey =
   | 'struktur'
   | 'proja'
   | 'absensi'
+  | 'notulen'
   | 'arsip'
   | 'pengaturan';
 
@@ -38,9 +39,10 @@ export const AdminSidebar: React.FC<Props> = ({
   ];
 
   const internalItems: { key: AdminMenuKey; label: string; icon: string; badge?: string }[] = [
-    { key: 'struktur', label: 'Struktur Organisasi', icon: 'bi-diagram-3-fill', badge: 'Baru' },
-    { key: 'proja', label: 'Program Kerja (Proja)', icon: 'bi-kanban-fill', badge: 'Kanban' },
+    { key: 'struktur', label: 'Struktur Organisasi', icon: 'bi-diagram-3-fill' },
+    { key: 'proja', label: 'Program Kerja (Proja)', icon: 'bi-calendar-event-fill', badge: 'Kalender' },
     { key: 'absensi', label: 'Absensi Kegiatan', icon: 'bi-calendar-check-fill' },
+    { key: 'notulen', label: 'Notulen Generator', icon: 'bi-journal-text', badge: 'Baru' },
     { key: 'arsip', label: 'E-Archive Dokumen', icon: 'bi-folder-symlink-fill' },
   ];
 
