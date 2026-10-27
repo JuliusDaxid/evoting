@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { supabase } from '../../lib/supabase';
 import { dbService } from '../../services/dbService';
 import { Candidate, Settings, Student } from '../../types';
 
@@ -18,8 +19,161 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
   const [downloadSuccessToast, setDownloadSuccessToast] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
+  // Realtime Live States
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
+  const [recentlyUpdatedCandId, setRecentlyUpdatedCandId] = useState<string | null>(null);
+  const [liveEventCount, setLiveEventCount] = useState<number>(0);
+  const [newVoteNotice, setNewVoteNotice] = useState<{
+    candidateNumber: number;
+    chairmanName: string;
+    voteCount: number;
+    timestamp: string;
+  } | null>(null);
+
+  const prevCandidatesRef = useRef<Candidate[]>([]);
+
+  const triggerNewVoteAlert = (cand: Candidate) => {
+    setRecentlyUpdatedCandId(cand.id);
+    setNewVoteNotice({
+      candidateNumber: cand.candidate_number,
+      chairmanName: cand.chairman_name,
+      voteCount: cand.vote_count,
+      timestamp: new Date().toLocaleTimeString('id-ID'),
+    });
+    setLiveEventCount((prev) => prev + 1);
+
+    setTimeout(() => {
+      setRecentlyUpdatedCandId((current) => (current === cand.id ? null : current));
+    }, 3000);
+
+    setTimeout(() => {
+      setNewVoteNotice((current) => (current?.candidateNumber === cand.candidate_number ? null : current));
+    }, 4500);
+  };
+
+  const silentRefresh = async () => {
+    try {
+      const [cList, sList] = await Promise.all([
+        dbService.getCandidates(),
+        dbService.getStudents(),
+      ]);
+
+      // Detect if any candidate got new votes
+      cList.forEach((newCand) => {
+        const oldCand = prevCandidatesRef.current.find((c) => c.id === newCand.id);
+        if (oldCand && (newCand.vote_count ?? 0) > (oldCand.vote_count ?? 0)) {
+          triggerNewVoteAlert(newCand);
+        }
+      });
+
+      prevCandidatesRef.current = cList;
+      setCandidates(cList);
+      setStudents(sList);
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+    } catch (err) {
+      console.warn('Silent refresh error:', err);
+    }
+  };
+
   useEffect(() => {
     loadData();
+
+    // 1. Supabase Realtime Channel
+    const channelName = `realtime_vote_results_${Math.random().toString(36).substring(2, 9)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'candidates',
+        },
+        (payload) => {
+          setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            const updated = payload.new as Candidate;
+            setCandidates((prev) => {
+              const oldCand = prev.find((c) => c.id === updated.id);
+              if (oldCand && (updated.vote_count ?? 0) > (oldCand.vote_count ?? 0)) {
+                triggerNewVoteAlert(updated);
+              }
+              return prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
+            });
+            // Update ref
+            prevCandidatesRef.current = prevCandidatesRef.current.map((c) =>
+              c.id === updated.id ? { ...c, ...updated } : c
+            );
+            silentRefresh();
+          } else {
+            silentRefresh();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'students',
+        },
+        (payload) => {
+          setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            const updatedStudent = payload.new as Student;
+            setStudents((prev) =>
+              prev.map((s) => (s.id === updatedStudent.id ? { ...s, ...updatedStudent } : s))
+            );
+          } else if (payload.eventType === 'INSERT' && payload.new) {
+            const newStudent = payload.new as Student;
+            setStudents((prev) => {
+              if (prev.some((s) => s.id === newStudent.id)) return prev;
+              return [...prev, newStudent];
+            });
+          } else {
+            silentRefresh();
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setIsRealtimeConnected(true);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setIsRealtimeConnected(false);
+        }
+      });
+
+    // 2. Local Custom Event Listener (saat voting pada tab/jendela yang sama)
+    const handleLocalVote = (e: any) => {
+      const candId = e.detail?.candidateId;
+      silentRefresh();
+      if (candId) {
+        setRecentlyUpdatedCandId(candId);
+        setTimeout(() => setRecentlyUpdatedCandId(null), 2500);
+      }
+    };
+    window.addEventListener('eosis_vote_cast', handleLocalVote);
+
+    // 3. Storage event listener (saat voting pada tab lain di browser)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'eosis_candidates' || e.key === 'eosis_students') {
+        silentRefresh();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // 4. Polling cerdas setiap 4 detik untuk memastikan kepastian konsistensi data
+    const intervalId = setInterval(() => {
+      silentRefresh();
+    }, 4000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('eosis_vote_cast', handleLocalVote);
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(intervalId);
+    };
   }, []);
 
   const loadData = async () => {
@@ -29,8 +183,10 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
         dbService.getCandidates(),
         dbService.getStudents(),
       ]);
+      prevCandidatesRef.current = cList;
       setCandidates(cList);
       setStudents(sList);
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
     } catch (err) {
       console.error('Failed to load vote results', err);
     } finally {
@@ -304,26 +460,97 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
         </div>
       )}
 
+      {/* Banner Notifikasi Suara Baru Masuk Secara Realtime */}
+      {newVoteNotice && (
+        <div className="no-print bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-4 rounded-2xl shadow-lg border border-emerald-400 flex items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center font-black text-sm shrink-0 shadow-inner">
+              #{newVoteNotice.candidateNumber}
+            </div>
+            <div>
+              <p className="text-xs font-black tracking-wide flex items-center gap-1.5">
+                <i className="bi bi-broadcast text-amber-300 animate-pulse"></i>
+                <span>SUARA BARU MASUK SECARA LIVE!</span>
+              </p>
+              <p className="text-[11px] text-emerald-100 mt-0.5">
+                Paslon <strong>No. {newVoteNotice.candidateNumber} ({newVoteNotice.chairmanName})</strong> bertambah suara menjadi{' '}
+                <span className="font-extrabold text-white underline underline-offset-2">{newVoteNotice.voteCount} suara</span> ({newVoteNotice.timestamp}).
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[10px] font-bold bg-white/20 px-2.5 py-1 rounded-full uppercase tracking-wider hidden sm:inline">
+              Realtime Update
+            </span>
+            <button
+              onClick={() => setNewVoteNotice(null)}
+              className="p-1 hover:bg-white/20 rounded-lg text-white/80 hover:text-white transition"
+              title="Tutup Notifikasi"
+            >
+              <i className="bi bi-x-lg text-xs"></i>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Action Header */}
       <div className="no-print flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-xs border border-slate-200">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
-            <i className="bi bi-bar-chart-fill text-blue-600"></i>
-            <span>Rekapitulasi &amp; Perolehan Suara</span>
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Hasil perhitungan suara pemilihan ketua dan wakil ketua OSIS {settings.election_period || 'Periode 2026/2027'}.
+          <div className="flex flex-wrap items-center gap-2.5 mb-1">
+            <h2 className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
+              <i className="bi bi-bar-chart-fill text-blue-600"></i>
+              <span>Rekapitulasi &amp; Perolehan Suara</span>
+            </h2>
+
+            {/* Live Realtime Indicator Badge */}
+            <div
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-xs transition-all ${
+                isRealtimeConnected
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  : 'bg-blue-50 text-blue-800 border-blue-200'
+              }`}
+              title={isRealtimeConnected ? 'Terhubung ke Supabase Realtime Channel secara live' : 'Sinkronisasi otomatis aktif'}
+            >
+              <span className="relative flex h-2.5 w-2.5">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    isRealtimeConnected ? 'bg-emerald-400' : 'bg-blue-400'
+                  }`}
+                ></span>
+                <span
+                  className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                    isRealtimeConnected ? 'bg-emerald-500' : 'bg-blue-500'
+                  }`}
+                ></span>
+              </span>
+              <span>{isRealtimeConnected ? 'Live Realtime Aktif' : 'Sinkronisasi Otomatis'}</span>
+            </div>
+
+            {liveEventCount > 0 && (
+              <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
+                +{liveEventCount} live update
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            Hasil perhitungan suara pemilihan ketua dan wakil ketua OSIS {settings.election_period || 'Periode 2026/2027'}.{' '}
+            {lastSyncTime && (
+              <span className="text-slate-400">
+                (Terakhir sinkron: {lastSyncTime})
+              </span>
+            )}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={loadData}
-            className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-            title="Muat ulang perolehan suara terbaru"
+            onClick={silentRefresh}
+            className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+            title="Muat ulang perolehan suara terbaru secara instan"
           >
             <i className="bi bi-arrow-clockwise text-sm"></i>
+            <span className="hidden md:inline">Perbarui</span>
           </button>
 
           {/* Tombol Utama: Download PDF Berita Acara */}
@@ -378,21 +605,27 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
           <span className="text-[11px] text-slate-400 block mt-0.5">Pemilih berhak</span>
         </div>
 
-        <div className="bg-white rounded-2xl p-4 shadow-xs border border-emerald-200 bg-emerald-50/20">
-          <span className="text-xs font-bold text-emerald-800 block">Total Suara Masuk</span>
-          <span className="text-2xl font-black text-emerald-700">{totalVotesCounted}</span>
+        <div className="bg-white rounded-2xl p-4 shadow-xs border border-emerald-200 bg-emerald-50/20 relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-emerald-800 block">Total Suara Masuk</span>
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+          </div>
+          <span className="text-2xl font-black text-emerald-700 block transition-all duration-500">{totalVotesCounted}</span>
           <span className="text-[11px] text-emerald-600 block mt-0.5">{votedStudents} siswa hadir</span>
         </div>
 
         <div className="bg-white rounded-2xl p-4 shadow-xs border border-amber-200 bg-amber-50/20">
           <span className="text-xs font-bold text-amber-800 block">Belum Memberikan Suara</span>
-          <span className="text-2xl font-black text-amber-700">{notVotedStudents}</span>
+          <span className="text-2xl font-black text-amber-700 block transition-all duration-500">{notVotedStudents}</span>
           <span className="text-[11px] text-amber-600 block mt-0.5">Siswa belum memilih</span>
         </div>
 
         <div className="bg-white rounded-2xl p-4 shadow-xs border border-blue-200 bg-blue-50/30">
           <span className="text-xs font-bold text-blue-900 block">Tingkat Partisipasi</span>
-          <span className="text-2xl font-black text-blue-800">{participationRate}%</span>
+          <span className="text-2xl font-black text-blue-800 block transition-all duration-500">{participationRate}%</span>
           <span className="text-[11px] text-blue-600 block mt-0.5">Persentase kehadiran</span>
         </div>
       </div>
@@ -474,26 +707,37 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
                 const color = colors[idx % colors.length];
                 const pct = totalVotesCounted > 0 ? (cand.vote_count / totalVotesCounted) * 100 : 0;
                 const isWinner = leadingCandidate?.id === cand.id;
+                const isRecentlyUpdated = recentlyUpdatedCandId === cand.id;
 
                 return (
                   <div
                     key={cand.id}
-                    className={`p-4 rounded-2xl border transition-all ${
-                      isWinner ? 'border-blue-400 bg-blue-50/30 shadow-xs' : 'border-slate-200 bg-white'
+                    className={`p-4 rounded-2xl border transition-all duration-500 relative overflow-hidden ${
+                      isRecentlyUpdated
+                        ? 'ring-4 ring-emerald-400 bg-emerald-50/60 shadow-lg scale-[1.02] border-emerald-500'
+                        : isWinner
+                        ? 'border-blue-400 bg-blue-50/30 shadow-xs'
+                        : 'border-slate-200 bg-white'
                     }`}
                   >
+                    {isRecentlyUpdated && (
+                      <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-xs animate-bounce">
+                        <i className="bi bi-arrow-up-circle-fill"></i> +1 Suara
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between mb-3">
                       <span className="w-8 h-8 rounded-xl bg-slate-900 text-white font-black text-sm flex items-center justify-center">
                         {cand.candidate_number}
                       </span>
-                      <span className="font-extrabold text-lg text-slate-800">
+                      <span className="font-extrabold text-lg text-slate-800 transition-all duration-500">
                         {pct.toFixed(1)}%
                       </span>
                     </div>
 
                     <div className="h-32 flex items-end justify-center bg-slate-50 rounded-xl p-2 mb-3">
                       <div
-                        className={`w-16 rounded-t-xl transition-all duration-700 ${color.bg}`}
+                        className={`w-16 rounded-t-xl transition-all duration-700 ease-out ${color.bg}`}
                         style={{ height: `${Math.max(12, pct)}%` }}
                       ></div>
                     </div>
@@ -604,9 +848,20 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
                 const isLeading = leadingCandidate?.id === cand.id && totalVotesCounted > 0;
 
                 return (
-                  <tr key={cand.id} className="hover:bg-slate-50/70 transition">
+                  <tr
+                    key={cand.id}
+                    className={`transition-all duration-300 ${
+                      recentlyUpdatedCandId === cand.id
+                        ? 'bg-emerald-50/90 ring-2 ring-emerald-400 font-medium'
+                        : 'hover:bg-slate-50/70'
+                    }`}
+                  >
                     <td className="py-4 px-4 text-center">
-                      <span className="w-8 h-8 rounded-xl bg-slate-900 text-white font-extrabold text-sm inline-flex items-center justify-center">
+                      <span className={`w-8 h-8 rounded-xl font-extrabold text-sm inline-flex items-center justify-center transition-all ${
+                        recentlyUpdatedCandId === cand.id
+                          ? 'bg-emerald-600 text-white scale-110 shadow-sm'
+                          : 'bg-slate-900 text-white'
+                      }`}>
                         {cand.candidate_number}
                       </span>
                     </td>
@@ -622,10 +877,20 @@ export const VoteResults: React.FC<Props> = ({ settings }) => {
                       {cand.slogan || '-'}
                     </td>
                     <td className="py-4 px-4 text-center">
-                      <span className="font-black text-slate-900 text-base">
-                        {cand.vote_count}
-                      </span>
-                      <span className="text-[11px] text-slate-400 block">suara sah</span>
+                      <div className="flex flex-col items-center justify-center">
+                        <span className={`font-black text-base transition-colors ${
+                          recentlyUpdatedCandId === cand.id ? 'text-emerald-700 scale-110' : 'text-slate-900'
+                        }`}>
+                          {cand.vote_count}
+                        </span>
+                        {recentlyUpdatedCandId === cand.id ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-600 text-white font-bold text-[10px] rounded-full animate-bounce mt-0.5">
+                            <i className="bi bi-arrow-up-short"></i> +1 Live
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 block">suara sah</span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-4 px-4 text-center">
                       <div className="inline-flex flex-col items-center">

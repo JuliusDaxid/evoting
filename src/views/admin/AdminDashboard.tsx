@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { dbService } from '../../services/dbService';
+import { supabase } from '../../lib/supabase';
 import { Candidate, ClassItem, OsisDocument, OsisMeeting, OsisMember, OsisProgram, Settings, Student } from '../../types';
 import { AdminMenuKey } from '../../components/AdminSidebar';
 
@@ -24,9 +25,75 @@ export const AdminDashboard: React.FC<Props> = ({
   const [meetings, setMeetings] = useState<OsisMeeting[]>([]);
   const [documents, setDocuments] = useState<OsisDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const isRefreshingRef = useRef(false);
 
   useEffect(() => {
     loadDashboardData();
+
+    // Silent background updater
+    const silentUpdate = async () => {
+      if (isRefreshingRef.current) return;
+      isRefreshingRef.current = true;
+      try {
+        const [stList, cdList] = await Promise.all([
+          dbService.getStudents(),
+          dbService.getCandidates(),
+        ]);
+        setStudents(stList);
+        setCandidates(cdList);
+      } catch (e) {
+        console.warn('Dashboard silent update error:', e);
+      } finally {
+        isRefreshingRef.current = false;
+      }
+    };
+
+    // 1. Supabase Realtime Subscription
+    let channel: any = null;
+    if (supabase) {
+      try {
+        channel = supabase
+          .channel(`dashboard_realtime_${Math.random().toString(36).substring(2, 7)}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'candidates' },
+            () => {
+              silentUpdate();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'students' },
+            () => {
+              silentUpdate();
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Supabase realtime init warning in dashboard:', err);
+      }
+    }
+
+    // 2. Local vote events & cross-tab sync
+    const handleVoteCast = () => {
+      silentUpdate();
+    };
+    window.addEventListener('eosis_vote_cast', handleVoteCast);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'eosis_students' || e.key === 'eosis_candidates' || e.key === 'eosis_last_vote_timestamp') {
+        silentUpdate();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener('eosis_vote_cast', handleVoteCast);
+      window.removeEventListener('storage', handleStorage);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
   const loadDashboardData = async () => {

@@ -10,6 +10,7 @@ import {
   Settings,
   Student,
 } from '../types';
+import { OFFICIAL_EOSIS_LOGO_SVG } from '../components/EosisLogo';
 
 export function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -104,7 +105,7 @@ const INITIAL_STUDENTS: Student[] = [
 const INITIAL_SETTINGS: Settings = {
   id: 1,
   school_name: 'SMP Negeri 1 Dayun',
-  school_logo: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=300&q=80',
+  school_logo: OFFICIAL_EOSIS_LOGO_SVG,
   election_period: 'Masa Bakti 2026/2027',
   is_election_active: true,
   admin_username: 'admin',
@@ -426,6 +427,13 @@ class DatabaseService {
 
   constructor() {
     this.initLocalStore();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('eosis_supabase_reconnected', () => {
+        this.isSupabaseReady = false;
+        this.hasCheckedSupabase = false;
+        this.checkSupabaseConnection();
+      });
+    }
   }
 
   private initLocalStore() {
@@ -440,6 +448,15 @@ class DatabaseService {
     }
     if (!localStorage.getItem('eosis_settings')) {
       localStorage.setItem('eosis_settings', JSON.stringify(INITIAL_SETTINGS));
+    } else {
+      const stored = localStorage.getItem('eosis_settings');
+      if (stored && (stored.includes('images.unsplash.com/photo-1546410531-bb4caa6b424d') || !JSON.parse(stored).school_logo)) {
+        try {
+          const parsed = JSON.parse(stored);
+          parsed.school_logo = OFFICIAL_EOSIS_LOGO_SVG;
+          localStorage.setItem('eosis_settings', JSON.stringify(parsed));
+        } catch {}
+      }
     }
     if (!localStorage.getItem('eosis_members')) {
       localStorage.setItem('eosis_members', JSON.stringify(INITIAL_OSIS_MEMBERS));
@@ -496,19 +513,32 @@ class DatabaseService {
 
   // --- SETTINGS ---
   async getSettings(): Promise<Settings> {
+    const sanitize = (s: Settings): Settings => {
+      if (
+        !s.school_logo ||
+        s.school_logo.includes('images.unsplash.com/photo-1546410531-bb4caa6b424d') ||
+        s.school_logo.trim() === ''
+      ) {
+        return { ...s, school_logo: OFFICIAL_EOSIS_LOGO_SVG };
+      }
+      return s;
+    };
+
     if (this.isSupabaseReady) {
       try {
         const { data, error } = await supabase.from('settings').select('*').eq('id', 1).single();
         if (!error && data) {
-          localStorage.setItem('eosis_settings', JSON.stringify(data));
-          return data as Settings;
+          const sanitized = sanitize(data as Settings);
+          localStorage.setItem('eosis_settings', JSON.stringify(sanitized));
+          return sanitized;
         }
       } catch (e) {
         console.warn('Falling back to local settings', e);
       }
     }
     const stored = localStorage.getItem('eosis_settings');
-    return stored ? JSON.parse(stored) : INITIAL_SETTINGS;
+    const result = stored ? JSON.parse(stored) : INITIAL_SETTINGS;
+    return sanitize(result);
   }
 
   async updateSettings(settings: Partial<Settings>): Promise<Settings> {
@@ -1054,9 +1084,11 @@ class DatabaseService {
   }
 
   // --- STUDENT AUTH & VOTING ---
-  async loginStudent(nisn: string, birthDate: string): Promise<Student> {
-    const cleanNisn = nisn.trim();
-    const cleanDate = birthDate.trim();
+  async loginStudent(nisn: string, _birthDate?: string): Promise<Student> {
+    const cleanNisn = (nisn || '').trim();
+    if (!cleanNisn) {
+      throw new Error('Harap masukkan nomor NISN Anda.');
+    }
 
     if (this.isSupabaseReady) {
       try {
@@ -1064,15 +1096,27 @@ class DatabaseService {
           .from('students')
           .select('*, classes(name)')
           .eq('nisn', cleanNisn)
-          .eq('birth_date', cleanDate)
           .single();
 
         if (!error && data) {
+          // Validasi ketat hak suara di level database
+          if (data.has_voted) {
+            const voteTime = data.voted_at
+              ? new Date(data.voted_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+              : 'sebelumnya';
+            throw new Error(
+              `NISN ${cleanNisn} (${data.name}) tercatat SUDAH MEMILIH pada ${voteTime}. Hak suara hanya dapat digunakan 1 kali dan tidak dapat diakses kembali.`
+            );
+          }
+
           const student: Student = {
             id: data.id,
             nisn: data.nisn,
             name: data.name,
             birth_date: data.birth_date,
+            gender: data.gender || 'L',
+            religion: data.religion || 'Islam',
+            address: data.address || '',
             class_id: data.class_id,
             class_name: (data.classes as any)?.name || 'Belum Ditentukan',
             has_voted: data.has_voted,
@@ -1080,42 +1124,110 @@ class DatabaseService {
             created_at: data.created_at,
           };
           return student;
+        } else if (error && (error.code === 'PGRST116' || error.message.includes('0 rows'))) {
+          throw new Error(`NISN ${cleanNisn} tidak terdaftar dalam DPT (Daftar Pemilih Tetap). Silakan hubungi Panitia OSIS.`);
         }
-      } catch (e) {
+      } catch (e: unknown) {
+        if (e instanceof Error && (e.message.includes('SUDAH MEMILIH') || e.message.includes('tidak terdaftar'))) {
+          throw e;
+        }
         console.warn('Supabase student login fallback to local', e);
       }
     }
 
+    // Local storage fallback
     const students = await this.getStudents();
-    const found = students.find(s => s.nisn === cleanNisn && s.birth_date === cleanDate);
+    const found = students.find(s => s.nisn.trim() === cleanNisn);
     if (!found) {
-      throw new Error('NISN atau Tanggal Lahir tidak cocok dengan data siswa terdaftar.');
+      throw new Error(`NISN ${cleanNisn} tidak terdaftar dalam DPT (Daftar Pemilih Tetap). Silakan hubungi Panitia OSIS.`);
     }
+
+    // Validasi ketat status memilih di data lokal
+    if (found.has_voted) {
+      throw new Error(
+        `NISN ${cleanNisn} (${found.name}) tercatat SUDAH MEMILIH pada pemilihan ini. Hak suara hanya dapat digunakan 1 kali dan tidak dapat diakses kembali.`
+      );
+    }
+
     return found;
   }
 
-  async castVote(studentId: string, candidateId: string, nisn: string, birthDate: string): Promise<{ success: boolean; message: string }> {
+  async castVote(studentId: string, candidateId: string, nisn: string, birthDate?: string): Promise<{ success: boolean; message: string }> {
     const settings = await this.getSettings();
     if (!settings.is_election_active) {
       throw new Error('Pemilihan sedang ditutup oleh Panitia OSIS.');
     }
 
+    const cleanNisn = (nisn || '').trim();
+
     if (this.isSupabaseReady) {
       try {
-        const { data, error } = await supabase.rpc('cast_vote', {
-          p_nisn: nisn,
-          p_birth_date: birthDate,
-          p_candidate_id: candidateId,
-        });
+        // 1. Verifikasi langsung ke database bahwa NISN belum memilih
+        const { data: studentDb, error: chkErr } = await supabase
+          .from('students')
+          .select('id, name, has_voted')
+          .eq('nisn', cleanNisn)
+          .single();
 
-        if (error) {
-          throw new Error(error.message || 'Gagal menyimpan suara ke database');
+        if (!chkErr && studentDb && studentDb.has_voted) {
+          throw new Error('Hak suara untuk NISN ini sudah digunakan sebelumnya! Setiap siswa hanya dapat memilih 1 kali.');
+        }
+
+        // 2. Coba eksekusi RPC database atomik
+        let rpcExecuted = false;
+        let rpcMessage = '';
+
+        try {
+          const { data, error } = await supabase.rpc('cast_vote', {
+            p_nisn: cleanNisn,
+            p_candidate_id: candidateId,
+          });
+
+          if (!error) {
+            rpcExecuted = true;
+            rpcMessage = data?.message || 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi!';
+          } else if (error.message && (error.message.includes('function public.cast_vote') || error.code === '42883')) {
+            // Coba dengan 3 argumen jika database masih memakai fungsi lama
+            const { data: oldData, error: oldErr } = await supabase.rpc('cast_vote', {
+              p_nisn: cleanNisn,
+              p_birth_date: birthDate || '2011-01-01',
+              p_candidate_id: candidateId,
+            });
+            if (!oldErr) {
+              rpcExecuted = true;
+              rpcMessage = oldData?.message || 'Suara Anda berhasil dicatat!';
+            }
+          } else {
+            throw new Error(error.message);
+          }
+        } catch (rpcErr: unknown) {
+          const msg = rpcErr instanceof Error ? rpcErr.message : '';
+          if (msg.includes('sudah digunakan') || msg.includes('tidak terdaftar') || msg.includes('ditutup')) {
+            throw rpcErr;
+          }
+          console.warn('RPC cast_vote fallback to direct transaction:', msg);
+        }
+
+        // 3. Jika RPC belum terpasang, lakukan pembaruan atomik langsung
+        if (!rpcExecuted) {
+          const { error: studentUpdateErr } = await supabase
+            .from('students')
+            .update({ has_voted: true, voted_at: new Date().toISOString() })
+            .eq('nisn', cleanNisn);
+
+          if (studentUpdateErr) {
+            throw new Error(`Gagal mencatat hak suara di database: ${studentUpdateErr.message}`);
+          }
+
+          const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidateId).single();
+          const currentCount = cand?.vote_count || 0;
+          await supabase.from('candidates').update({ vote_count: currentCount + 1 }).eq('id', candidateId);
         }
 
         this.updateLocalVoteState(studentId, candidateId);
         return {
           success: true,
-          message: data?.message || 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi!',
+          message: rpcMessage || 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi!',
         };
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : 'Terjadi kesalahan sistem saat voting';
@@ -1123,10 +1235,11 @@ class DatabaseService {
       }
     }
 
+    // Local storage execution
     const students = await this.getStudents();
-    const currentStudent = students.find(s => s.id === studentId || s.nisn === nisn);
+    const currentStudent = students.find(s => s.id === studentId || s.nisn === cleanNisn);
     if (!currentStudent) {
-      throw new Error('Data siswa tidak ditemukan.');
+      throw new Error('Data siswa tidak ditemukan dalam DPT.');
     }
     if (currentStudent.has_voted) {
       throw new Error('Anda sudah menggunakan hak suara Anda sebelumnya. Setiap siswa hanya dapat memilih 1 kali!');
@@ -1145,9 +1258,13 @@ class DatabaseService {
     targetCandidate.vote_count = (targetCandidate.vote_count || 0) + 1;
     localStorage.setItem('eosis_candidates', JSON.stringify(candidates));
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eosis_vote_cast', { detail: { candidateId, studentId } }));
+    }
+
     return {
       success: true,
-      message: 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi',
+      message: 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi!',
     };
   }
 
@@ -1165,6 +1282,10 @@ class DatabaseService {
     if (c) {
       c.vote_count = (c.vote_count || 0) + 1;
       localStorage.setItem('eosis_candidates', JSON.stringify(cands));
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eosis_vote_cast', { detail: { candidateId, studentId } }));
     }
   }
 

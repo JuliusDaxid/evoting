@@ -1,5 +1,6 @@
 import React from 'react';
 import { AuthSession, Settings } from '../types';
+import { EosisLogo } from './EosisLogo';
 
 interface Props {
   session: AuthSession;
@@ -22,20 +23,8 @@ export const Navbar: React.FC<Props> = ({
         <div className="flex items-center justify-between h-16">
           {/* Logo & School Identity */}
           <div className="flex items-center gap-3">
-            <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-blue-50 border border-blue-200 flex items-center justify-center shadow-xs">
-              {settings.school_logo ? (
-                <img
-                  src={settings.school_logo}
-                  alt="Logo Sekolah"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src =
-                      'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=120&q=80';
-                  }}
-                />
-              ) : (
-                <i className="bi bi-mortarboard-fill text-blue-600 text-xl"></i>
-              )}
+            <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-white border border-slate-200 flex items-center justify-center shadow-xs shrink-0 p-1">
+              <EosisLogo logoUrl={settings.school_logo} size="md" alt="Logo eOSIS" />
             </div>
 
             <div>

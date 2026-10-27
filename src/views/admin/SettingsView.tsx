@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { dbService } from '../../services/dbService';
 import { Settings } from '../../types';
+import {
+  getActiveSupabaseConfig,
+  saveSupabaseConfig,
+  resetSupabaseConfigToDefault,
+  testSupabaseConnection,
+  cleanSupabaseUrl,
+  DEFAULT_SUPABASE_URL,
+} from '../../lib/supabase';
+import { EosisLogo, OFFICIAL_EOSIS_LOGO_SVG } from '../../components/EosisLogo';
 
 interface Props {
   settings: Settings;
@@ -30,6 +39,23 @@ export const SettingsView: React.FC<Props> = ({
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Database Configuration State (Direct UI management)
+  const initialDbConfig = getActiveSupabaseConfig();
+  const [dbUrl, setDbUrl] = useState(initialDbConfig.url);
+  const [dbAnonKey, setDbAnonKey] = useState(initialDbConfig.anonKey);
+  const [isCustomDb, setIsCustomDb] = useState(initialDbConfig.isCustom);
+  const [showAnonKey, setShowAnonKey] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    cleanedUrl: string;
+    tablesFound: boolean;
+    details?: string;
+  } | null>(null);
+  const [savingDb, setSavingDb] = useState(false);
+  const [dbToast, setDbToast] = useState<{ text: string; isError: boolean } | null>(null);
 
   // Status indicators
   const [saving, setSaving] = useState(false);
@@ -217,16 +243,15 @@ export const SettingsView: React.FC<Props> = ({
 
             {/* Logo Input */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Logo Sekolah (URL atau Upload File)
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>Logo Sekolah / eOSIS (Upload File atau URL)</span>
+                <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                  <i className="bi bi-shield-check"></i> Selalu Tampil (Auto Fallback)
+                </span>
               </label>
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
-                  {schoolLogo ? (
-                    <img src={schoolLogo} alt="Logo" className="w-full h-full object-cover" />
-                  ) : (
-                    <i className="bi bi-image text-slate-400 text-2xl"></i>
-                  )}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 p-1.5 shadow-xs">
+                  <EosisLogo logoUrl={schoolLogo} size="xl" alt="Preview Logo" />
                 </div>
 
                 <div className="flex-1 space-y-2">
@@ -235,12 +260,12 @@ export const SettingsView: React.FC<Props> = ({
                       type="text"
                       value={schoolLogo}
                       onChange={(e) => setSchoolLogo(e.target.value)}
-                      placeholder="https://... URL gambar logo sekolah"
-                      className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono"
+                      placeholder="https://... URL logo (atau klik upload)"
+                      className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono"
                     />
-                    <label className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer text-xs font-bold flex items-center gap-1.5">
+                    <label className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl cursor-pointer text-xs font-bold flex items-center gap-1.5 transition">
                       <i className="bi bi-upload"></i>
-                      <span>Upload</span>
+                      <span>Upload File</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -248,6 +273,20 @@ export const SettingsView: React.FC<Props> = ({
                         className="hidden"
                       />
                     </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSchoolLogo(OFFICIAL_EOSIS_LOGO_SVG)}
+                      className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold inline-flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                    >
+                      <i className="bi bi-patch-check-fill text-blue-600"></i>
+                      <span>Gunakan Logo Resmi eOSIS</span>
+                    </button>
+                    <span className="text-[11px] text-slate-400">
+                      Format didukung: PNG, JPG, SVG, WebP, atau Base64.
+                    </span>
                   </div>
                 </div>
               </div>
@@ -362,85 +401,395 @@ export const SettingsView: React.FC<Props> = ({
         </form>
       )}
 
-      {/* TAB 3: SUPABASE & DATABASE STATUS */}
+      {/* TAB 3: KONFIGURASI DATABASE SUPABASE */}
       {activeTab === 'supabase' && (
         <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200 space-y-6">
+          {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div>
-              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-                <i className="bi bi-database-fill-check text-blue-600"></i>
-                <span>Status &amp; Konfigurasi Supabase</span>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-bold mb-1.5">
+                <i className="bi bi-hdd-network"></i>
+                <span>Pengaturan Cloud Database</span>
+              </div>
+              <h3 className="font-extrabold text-slate-800 text-base flex items-center gap-2">
+                <i className="bi bi-database-gear text-blue-600"></i>
+                <span>Konfigurasi Database Supabase</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Penyimpanan cloud, Row Level Security (RLS), dan RPC Atomic Transaction
+                Kelola API URL dan Anon Key Supabase secara langsung tanpa mengubah kode sumber.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={onRefreshSupabaseStatus}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition"
-            >
-              <i className="bi bi-arrow-repeat"></i>
-              <span>Cek Koneksi Ulang</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={onRefreshSupabaseStatus}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                <i className="bi bi-arrow-repeat"></i>
+                <span>Cek Status</span>
+              </button>
+              <button
+                type="button"
+                onClick={onOpenSupabaseGuide}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                <i className="bi bi-file-earmark-code"></i>
+                <span>Skrip SQL</span>
+              </button>
+            </div>
           </div>
 
-          {/* Connection Card */}
+          {/* Database Toast Alert */}
+          {dbToast && (
+            <div
+              className={`p-4 rounded-2xl text-xs font-semibold flex items-start gap-2.5 animate-fadeIn ${
+                dbToast.isError
+                  ? 'bg-rose-50 border border-rose-200 text-rose-700'
+                  : 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+              }`}
+            >
+              <i
+                className={`bi ${
+                  dbToast.isError ? 'bi-exclamation-triangle-fill text-rose-600' : 'bi-check-circle-fill text-emerald-600'
+                } text-lg shrink-0 mt-0.5`}
+              ></i>
+              <div className="flex-1">
+                <span className="font-bold block">{dbToast.isError ? 'Terjadi Kesalahan:' : 'Berhasil:'}</span>
+                <span className="leading-relaxed">{dbToast.text}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Active Connection Status Overview */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700">Project Endpoint:</span>
-              <span className="font-mono text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                uyyagxxaamnschocajpe.supabase.co
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-700">Status Database:</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
+                    supabaseStatus.tablesFound
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                      : supabaseStatus.isConnected
+                      ? 'bg-amber-50 text-amber-700 border-amber-300'
+                      : 'bg-rose-50 text-rose-700 border-rose-300'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      supabaseStatus.tablesFound
+                        ? 'bg-emerald-500 animate-pulse'
+                        : supabaseStatus.isConnected
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500'
+                    }`}
+                  ></span>
+                  <span>
+                    {supabaseStatus.tablesFound
+                      ? 'Aktif & Tabel Lengkap'
+                      : supabaseStatus.isConnected
+                      ? 'Terkoneksi (Perlu Migrasi SQL)'
+                      : 'Koneksi Terputus / Offline'}
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">Sumber Kredensial:</span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${
+                    isCustomDb
+                      ? 'bg-purple-50 text-purple-700 border-purple-200'
+                      : 'bg-slate-200 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {isCustomDb ? 'Kustom (Admin)' : 'Default Bawaan'}
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700">Status Tabel &amp; Schema Cache:</span>
-              <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
-                  supabaseStatus.tablesFound
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                    : 'bg-amber-50 text-amber-700 border-amber-300'
-                }`}
-              >
-                <i className={`bi ${supabaseStatus.tablesFound ? 'bi-check2-circle' : 'bi-exclamation-circle'}`}></i>
-                {supabaseStatus.tablesFound ? 'Tabel Ditemukan & Siap Digunakan' : 'Tabel Belum Dibuat di Supabase'}
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-xs">
+              <span className="text-slate-500">Endpoint Aktif:</span>
+              <code className="font-mono text-xs text-blue-700 bg-white px-2.5 py-1 rounded border border-slate-200 truncate max-w-full">
+                {cleanSupabaseUrl(dbUrl) || DEFAULT_SUPABASE_URL}
+              </code>
             </div>
 
-            <p className="text-xs text-slate-600 pt-1">
+            <p className="text-xs text-slate-600 pt-1 leading-relaxed">
               {supabaseStatus.message}
             </p>
           </div>
 
-          {/* Action Row */}
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={onOpenSupabaseGuide}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition"
-            >
-              <i className="bi bi-file-earmark-code"></i>
-              <span>Buka Skrip SQL &amp; Panduan Migrasi</span>
-            </button>
-          </div>
+          {/* Configuration Form */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSavingDb(true);
+              setDbToast(null);
+              setTestResult(null);
+
+              const res = saveSupabaseConfig(dbUrl, dbAnonKey);
+              if (!res.success) {
+                setDbToast({ text: res.error || 'Gagal menyimpan konfigurasi.', isError: true });
+                setSavingDb(false);
+                return;
+              }
+
+              setDbUrl(res.cleanedUrl);
+              setIsCustomDb(true);
+              setDbToast({
+                text: `Konfigurasi Supabase berhasil disimpan! Endpoint dibersihkan menjadi ${res.cleanedUrl} dan koneksi langsung aktif.`,
+                isError: false,
+              });
+              setSavingDb(false);
+              onRefreshSupabaseStatus();
+            }}
+            className="space-y-5"
+          >
+            {/* Input API URL */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>
+                  Supabase API URL (Project URL) <span className="text-rose-500">*</span>
+                </span>
+                <span className="text-[11px] font-normal text-slate-400">Contoh: https://xyz.supabase.co</span>
+              </label>
+
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                  <i className="bi bi-link-45deg text-lg"></i>
+                </span>
+                <input
+                  type="text"
+                  value={dbUrl}
+                  onChange={(e) => {
+                    setDbUrl(e.target.value);
+                    setTestResult(null);
+                  }}
+                  placeholder="https://your-project-id.supabase.co"
+                  required
+                  className="w-full pl-10 pr-4 py-2.5 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                />
+              </div>
+
+              {/* Automatic URL Cleaning Notice */}
+              {dbUrl.toLowerCase().includes('/rest/v1') && (
+                <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs flex items-center gap-2">
+                  <i className="bi bi-scissors text-amber-600 text-base shrink-0"></i>
+                  <div>
+                    <span className="font-bold">Pembersihan Otomatis:</span> Terdeteksi akhiran <code>/rest/v1/</code>. Saat disimpan, sistem akan otomatis membersihkannya menjadi: <strong>{cleanSupabaseUrl(dbUrl)}</strong>
+                  </div>
+                </div>
+              )}
+
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Anda dapat menyalin URL langsung dari Project Settings &gt; API di Supabase. Sistem secara otomatis memotong akhiran <code>/rest/v1/</code> jika ada.
+              </span>
+            </div>
+
+            {/* Input Anon Key */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  Supabase Anon (Public) Key <span className="text-rose-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAnonKey(!showAnonKey)}
+                  className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                >
+                  <i className={`bi ${showAnonKey ? 'bi-eye-slash' : 'bi-eye'}`}></i>
+                  <span>{showAnonKey ? 'Sembunyikan Kunci' : 'Tampilkan Kunci'}</span>
+                </button>
+              </div>
+
+              <div className="relative">
+                {showAnonKey ? (
+                  <textarea
+                    rows={3}
+                    value={dbAnonKey}
+                    onChange={(e) => {
+                      setDbAnonKey(e.target.value);
+                      setTestResult(null);
+                    }}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    required
+                    className="w-full p-3 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                  />
+                ) : (
+                  <input
+                    type="password"
+                    value={dbAnonKey}
+                    onChange={(e) => {
+                      setDbAnonKey(e.target.value);
+                      setTestResult(null);
+                    }}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    required
+                    className="w-full px-3.5 py-2.5 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                  />
+                )}
+              </div>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Anon key aman untuk sisi klien dan digunakan untuk mengamankan data pemilih melalui Row Level Security (RLS).
+              </span>
+            </div>
+
+            {/* Live Test Connection Result Box */}
+            {testResult && (
+              <div
+                className={`p-4 rounded-2xl text-xs font-semibold flex items-start gap-3 animate-fadeIn ${
+                  testResult.success
+                    ? testResult.tablesFound
+                      ? 'bg-emerald-50 border border-emerald-300 text-emerald-800'
+                      : 'bg-amber-50 border border-amber-300 text-amber-800'
+                    : 'bg-rose-50 border border-rose-300 text-rose-800'
+                }`}
+              >
+                <i
+                  className={`bi ${
+                    testResult.success
+                      ? testResult.tablesFound
+                        ? 'bi-check-circle-fill text-emerald-600'
+                        : 'bi-exclamation-triangle-fill text-amber-600'
+                      : 'bi-x-circle-fill text-rose-600'
+                  } text-xl shrink-0 mt-0.5`}
+                ></i>
+                <div className="space-y-1">
+                  <span className="font-extrabold text-sm block">
+                    {testResult.success
+                      ? testResult.tablesFound
+                        ? 'Koneksi Berhasil & Database Siap!'
+                        : 'Koneksi Berhasil, Perlu Setup Tabel'
+                      : 'Koneksi Gagal / Kredensial Salah'}
+                  </span>
+                  <p className="leading-relaxed">{testResult.message}</p>
+                  {testResult.cleanedUrl && (
+                    <p className="text-[11px] opacity-90">
+                      Endpoint yang diuji: <code className="font-mono bg-white/60 px-1 py-0.5 rounded">{testResult.cleanedUrl}</code>
+                    </p>
+                  )}
+                  {testResult.success && !testResult.tablesFound && (
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={onOpenSupabaseGuide}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs inline-flex items-center gap-1.5"
+                      >
+                        <i className="bi bi-terminal"></i>
+                        <span>Buka &amp; Jalankan Skrip SQL</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Uji Koneksi */}
+                <button
+                  type="button"
+                  disabled={testingConnection || savingDb}
+                  onClick={async () => {
+                    setTestingConnection(true);
+                    setTestResult(null);
+                    setDbToast(null);
+
+                    try {
+                      const res = await testSupabaseConnection(dbUrl, dbAnonKey);
+                      setTestResult(res);
+                    } catch (e: unknown) {
+                      const msg = e instanceof Error ? e.message : 'Uji koneksi gagal';
+                      setTestResult({
+                        success: false,
+                        cleanedUrl: cleanSupabaseUrl(dbUrl),
+                        tablesFound: false,
+                        message: msg,
+                      });
+                    } finally {
+                      setTestingConnection(false);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {testingConnection ? (
+                    <>
+                      <i className="bi bi-arrow-repeat animate-spin text-blue-600"></i>
+                      <span>Menguji Endpoint...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-broadcast"></i>
+                      <span>Uji Koneksi</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Reset ke Default */}
+                {isCustomDb && (
+                  <button
+                    type="button"
+                    disabled={savingDb}
+                    onClick={() => {
+                      if (window.confirm('Apakah Anda yakin ingin mengembalikan konfigurasi Supabase ke default bawaan sistem?')) {
+                        const def = resetSupabaseConfigToDefault();
+                        setDbUrl(def.url);
+                        setDbAnonKey(def.anonKey);
+                        setIsCustomDb(false);
+                        setTestResult(null);
+                        setDbToast({
+                          text: 'Konfigurasi database telah dikembalikan ke pengaturan default bawaan.',
+                          isError: false,
+                        });
+                        onRefreshSupabaseStatus();
+                      }
+                    }}
+                    className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <i className="bi bi-arrow-counterclockwise"></i>
+                    <span>Reset ke Default</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Simpan & Terapkan */}
+              <button
+                type="submit"
+                disabled={savingDb || testingConnection}
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold rounded-xl transition shadow-md disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+              >
+                {savingDb ? (
+                  <>
+                    <i className="bi bi-arrow-repeat animate-spin"></i>
+                    <span>Menyimpan &amp; Memperbarui...</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-check2-circle text-sm"></i>
+                    <span>Simpan &amp; Terapkan Konfigurasi</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
 
           {/* Security Architecture Summary */}
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
             <span className="font-bold text-slate-800 block flex items-center gap-1.5">
-              <i className="bi bi-shield-lock text-emerald-600"></i>
-              <span>Mekanisme Keamanan Satu Siswa = Satu Suara</span>
+              <i className="bi bi-shield-lock-fill text-emerald-600"></i>
+              <span>Keamanan Hak Suara &amp; Validasi Database:</span>
             </span>
             <ul className="list-disc list-inside space-y-1 text-slate-600 pl-1">
               <li>
-                <strong>Supabase RPC <code className="font-mono bg-slate-200 px-1 rounded">cast_vote()</code>:</strong> Memverifikasi NISN dan Tanggal Lahir langsung di level database PostgreSQL dengan baris terkunci (<code className="font-mono">FOR UPDATE</code>), mencegah refresh, double tab, atau manipulasi browser.
+                <strong>Verifikasi NISN Mandiri:</strong> Siswa hanya perlu memasukkan nomor NISN. Sistem memvalidasi apakah siswa terdaftar di DPT dan memeriksa kolom <code className="font-mono bg-slate-200 px-1 rounded">has_voted</code> secara ketat sebelum mengizinkan voting.
               </li>
               <li>
-                <strong>Asas Rahasia (LUBER):</strong> Suara kandidat diincrement secara anonim; kolom <code className="font-mono">students</code> hanya mencatat <code className="font-mono">has_voted = true</code> dan waktu, tanpa mengaitkan pilihan pasangan calon dengan identitas siswa.
+                <strong>Supabase RPC <code className="font-mono bg-slate-200 px-1 rounded">cast_vote(p_nisn, p_candidate_id)</code>:</strong> Menjamin satu siswa hanya dapat memberikan satu suara dengan penguncian baris tingkat database (<code className="font-mono">FOR UPDATE</code>), mencegah double vote dan manipulasi refresh.
               </li>
               <li>
-                <strong>Row Level Security (RLS):</strong> Mencegah akses data ilegal dan manipulasi DPT siswa.
+                <strong>Pembersihan URL Otomatis:</strong> Anda tidak perlu khawatir salah menyalin URL REST. Format URL dibersihkan dari <code>/rest/v1/</code> secara otomatis sehingga client Supabase selalu terhubung secara optimal.
               </li>
             </ul>
           </div>

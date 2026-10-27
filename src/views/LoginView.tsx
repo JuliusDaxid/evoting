@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { dbService } from '../services/dbService';
 import { AuthSession, Settings, Student } from '../types';
+import { EosisLogo } from '../components/EosisLogo';
 
 interface Props {
   settings: Settings;
@@ -11,9 +12,8 @@ interface Props {
 export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSupabaseGuide }) => {
   const [activeTab, setActiveTab] = useState<'student' | 'admin'>('student');
 
-  // Student form state
+  // Student form state (NISN Only)
   const [nisn, setNisn] = useState('');
-  const [birthDate, setBirthDate] = useState('');
   const [studentError, setStudentError] = useState<string | null>(null);
   const [studentLoading, setStudentLoading] = useState(false);
 
@@ -28,24 +28,21 @@ export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSup
     e.preventDefault();
     setStudentError(null);
 
-    if (!nisn.trim()) {
+    const cleanNisn = nisn.trim();
+    if (!cleanNisn) {
       setStudentError('Harap masukkan nomor NISN Anda.');
-      return;
-    }
-    if (!birthDate) {
-      setStudentError('Harap pilih tanggal lahir Anda.');
       return;
     }
 
     setStudentLoading(true);
     try {
-      const student = await dbService.loginStudent(nisn, birthDate);
+      const student = await dbService.loginStudent(cleanNisn);
       onLoginSuccess({
         role: 'student',
         student,
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Login gagal. Periksa NISN dan tanggal lahir.';
+      const msg = err instanceof Error ? err.message : 'Login gagal. Periksa nomor NISN Anda.';
       setStudentError(msg);
     } finally {
       setStudentLoading(false);
@@ -84,9 +81,8 @@ export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSup
     }
   };
 
-  const fillDemoStudent = (demoNisn: string, demoBirth: string) => {
+  const fillDemoStudent = (demoNisn: string) => {
     setNisn(demoNisn);
-    setBirthDate(demoBirth);
     setStudentError(null);
   };
 
@@ -111,20 +107,8 @@ export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSup
               <span>Sistem Pemilihan Resmi OSIS</span>
             </div>
 
-            <div className="w-16 h-16 rounded-2xl bg-white p-2 shadow-lg mb-5 overflow-hidden flex items-center justify-center">
-              {settings.school_logo ? (
-                <img
-                  src={settings.school_logo}
-                  alt="Logo Sekolah"
-                  className="w-full h-full object-cover rounded-xl"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src =
-                      'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=120&q=80';
-                  }}
-                />
-              ) : (
-                <i className="bi bi-mortarboard-fill text-blue-600 text-3xl"></i>
-              )}
+            <div className="w-16 h-16 rounded-2xl bg-white p-2 shadow-lg mb-5 overflow-hidden flex items-center justify-center shrink-0">
+              <EosisLogo logoUrl={settings.school_logo} size="xl" alt="Logo eOSIS" />
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
@@ -191,76 +175,66 @@ export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSup
             </button>
           </div>
 
-          {/* STUDENT LOGIN FORM */}
+          {/* STUDENT LOGIN FORM (NISN ONLY) */}
           {activeTab === 'student' && (
             <div>
               <div className="mb-5">
-                <h2 className="text-xl font-bold text-slate-800">Masuk sebagai Siswa</h2>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-bold mb-2">
+                  <i className="bi bi-shield-check"></i>
+                  <span>Login Cepat Pemilih OSIS</span>
+                </div>
+                <h2 className="text-xl font-bold text-slate-800">Masuk sebagai Siswa (Pemilih)</h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Gunakan NISN (10 Digit) dan Tanggal Lahir untuk memverifikasi hak suara Anda.
+                  Masukkan nomor NISN Anda untuk memverifikasi hak suara secara langsung dan aman.
                 </p>
               </div>
 
               {studentError && (
-                <div className="mb-4 p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-start gap-2 animate-shake">
-                  <i className="bi bi-exclamation-triangle-fill text-rose-500 text-base shrink-0 mt-0.5"></i>
+                <div className="mb-4 p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-start gap-2.5 animate-shake">
+                  <i className="bi bi-exclamation-triangle-fill text-rose-500 text-lg shrink-0 mt-0.5"></i>
                   <div>
-                    <span className="font-semibold block">Gagal Verifikasi:</span>
-                    <span>{studentError}</span>
+                    <span className="font-bold block text-rose-800">Pemberitahuan Hak Suara:</span>
+                    <span className="leading-relaxed">{studentError}</span>
                   </div>
                 </div>
               )}
 
               <form onSubmit={handleStudentLogin} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    NISN (Nomor Induk Siswa Nasional)
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                    <span>NISN (Nomor Induk Siswa Nasional) <span className="text-rose-500">*</span></span>
+                    <span className="text-[11px] font-normal text-slate-400">10 Digit Angka</span>
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                      <i className="bi bi-credit-card-2-front"></i>
+                      <i className="bi bi-person-vcard text-lg"></i>
                     </span>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={nisn}
-                      onChange={(e) => setNisn(e.target.value)}
-                      placeholder="Contoh: 0081234502"
+                      onChange={(e) => setNisn(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Masukkan 10 digit NISN Anda..."
                       required
-                      className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                      autoFocus
+                      className="w-full pl-11 pr-4 py-3 text-sm font-semibold tracking-wide rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition shadow-inner placeholder:font-normal placeholder:tracking-normal"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Tanggal Lahir
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                      <i className="bi bi-calendar-event"></i>
-                    </span>
-                    <input
-                      type="date"
-                      value={birthDate}
-                      onChange={(e) => setBirthDate(e.target.value)}
-                      required
-                      className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-                    />
+                  <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 text-[11px] text-slate-500 flex items-center gap-2">
+                    <i className="bi bi-info-circle text-blue-600 shrink-0"></i>
+                    <span>Cukup masukkan NISN. Sistem akan otomatis memverifikasi nama, kelas, dan hak suara Anda di database.</span>
                   </div>
-                  <span className="text-[11px] text-slate-400 mt-1 block">
-                    Pilih tanggal lahir sesuai data di buku rapor sekolah.
-                  </span>
                 </div>
 
                 <button
                   type="submit"
                   disabled={studentLoading}
-                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold text-sm rounded-xl shadow-md transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] text-white font-extrabold text-sm rounded-xl shadow-md transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {studentLoading ? (
                     <>
-                      <i className="bi bi-arrow-repeat animate-spin"></i>
-                      <span>Memverifikasi Data Siswa...</span>
+                      <i className="bi bi-arrow-repeat animate-spin text-base"></i>
+                      <span>Memverifikasi Hak Suara di Database...</span>
                     </>
                   ) : (
                     <>
@@ -279,24 +253,28 @@ export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSup
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => fillDemoStudent('0081234502', '2011-08-22')}
-                    className="p-2 text-left bg-slate-50 hover:bg-blue-50/70 border border-slate-200 rounded-lg text-xs transition group"
+                    onClick={() => fillDemoStudent('0081234502')}
+                    className="p-2 text-left bg-slate-50 hover:bg-blue-50/70 border border-slate-200 rounded-lg text-xs transition group cursor-pointer"
                   >
                     <span className="font-semibold text-slate-800 group-hover:text-blue-700 block truncate">
-                      Annisa Putri R.
+                      Annisa Putri R. (NISN: 0081234502)
                     </span>
-                    <span className="text-[10px] text-slate-500 block">Status: Belum Memilih</span>
+                    <span className="text-[10px] text-emerald-600 font-bold block flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Belum Memilih
+                    </span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => fillDemoStudent('0081234501', '2011-05-14')}
-                    className="p-2 text-left bg-slate-50 hover:bg-blue-50/70 border border-slate-200 rounded-lg text-xs transition group"
+                    onClick={() => fillDemoStudent('0081234501')}
+                    className="p-2 text-left bg-slate-50 hover:bg-rose-50/70 border border-slate-200 rounded-lg text-xs transition group cursor-pointer"
                   >
-                    <span className="font-semibold text-slate-800 group-hover:text-blue-700 block truncate">
-                      Ahmad Rizky (Sudah)
+                    <span className="font-semibold text-slate-800 group-hover:text-rose-700 block truncate">
+                      Ahmad Rizky (NISN: 0081234501)
                     </span>
-                    <span className="text-[10px] text-slate-500 block">Status: Sudah Memilih</span>
+                    <span className="text-[10px] text-rose-600 font-bold block flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Sudah Memilih (Uji Blokir)
+                    </span>
                   </button>
                 </div>
               </div>

@@ -123,12 +123,13 @@ VALUES (1, 'SMP Negeri 1 Dayun', 'https://images.unsplash.com/photo-1546410531-b
 ON CONFLICT (id) DO NOTHING;
 
 -- ------------------------------------------------------------------------------
--- 5. FUNCTION / RPC VOTING AMAN (Satu Siswa = Satu Suara, Bebas Manipulasi)
+-- 5. FUNCTION / RPC VOTING AMAN (Satu Siswa = Satu Suara, Berdasarkan NISN)
 -- ------------------------------------------------------------------------------
+-- Versi Utama: Validasi ketat hak suara berdasarkan NISN (Tanpa perlu tanggal lahir)
 CREATE OR REPLACE FUNCTION public.cast_vote(
     p_nisn VARCHAR(50),
-    p_birth_date DATE,
-    p_candidate_id UUID
+    p_candidate_id UUID,
+    p_birth_date DATE DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -139,24 +140,28 @@ DECLARE
     v_candidate public.candidates%ROWTYPE;
     v_settings public.settings%ROWTYPE;
 BEGIN
+    -- 1. Periksa apakah pemilihan aktif
     SELECT * INTO v_settings FROM public.settings WHERE id = 1;
     IF v_settings.is_election_active IS FALSE THEN
         RAISE EXCEPTION 'Pemilihan OSIS sedang ditutup atau belum dibuka oleh panitia.';
     END IF;
 
+    -- 2. Kunci baris siswa berdasarkan NISN (FOR UPDATE) agar aman dari race condition
     SELECT * INTO v_student 
     FROM public.students 
-    WHERE TRIM(nisn) = TRIM(p_nisn) AND birth_date = p_birth_date
+    WHERE TRIM(nisn) = TRIM(p_nisn)
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Data siswa tidak ditemukan. Periksa kembali NISN dan Tanggal Lahir Anda.';
+        RAISE EXCEPTION 'NISN tidak terdaftar dalam Daftar Pemilih Tetap (DPT).';
     END IF;
 
+    -- 3. Validasi ketat apakah hak suara sudah digunakan
     IF v_student.has_voted = TRUE THEN
-        RAISE EXCEPTION 'Anda sudah menggunakan hak suara Anda sebelumnya. Setiap siswa hanya dapat memilih 1 kali!';
+        RAISE EXCEPTION 'Hak suara untuk NISN ini sudah digunakan sebelumnya! Setiap siswa hanya dapat memilih 1 kali.';
     END IF;
 
+    -- 4. Validasi kandidat
     SELECT * INTO v_candidate
     FROM public.candidates
     WHERE id = p_candidate_id;
@@ -165,11 +170,13 @@ BEGIN
         RAISE EXCEPTION 'Kandidat yang dipilih tidak valid.';
     END IF;
 
+    -- 5. Perbarui status siswa menjadi sudah memilih
     UPDATE public.students
     SET has_voted = TRUE,
         voted_at = NOW()
     WHERE id = v_student.id;
 
+    -- 6. Tambahkan suara ke kandidat terpilih secara atomik
     UPDATE public.candidates
     SET vote_count = vote_count + 1
     WHERE id = p_candidate_id;
@@ -179,6 +186,21 @@ BEGIN
         'message', 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi!',
         'voted_at', NOW()
     );
+END;
+$$;
+
+-- Overload untuk kompatibilitas jika sistem lama memanggil dengan 3 parameter (nisn, birth_date, candidate_id)
+CREATE OR REPLACE FUNCTION public.cast_vote(
+    p_nisn VARCHAR(50),
+    p_birth_date DATE,
+    p_candidate_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN public.cast_vote(p_nisn, p_candidate_id, p_birth_date);
 END;
 $$;
 
@@ -337,7 +359,35 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authentic
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
 
+GRANT EXECUTE ON FUNCTION public.cast_vote(VARCHAR, UUID, DATE) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.cast_vote(VARCHAR, DATE, UUID) TO anon, authenticated, service_role;
+
+-- ==============================================================================
+-- AKTIFKAN SUPABASE REALTIME REPLICATION (UNTUK PEROLEHAN SUARA LIVE)
+-- ==============================================================================
+ALTER TABLE public.candidates REPLICA IDENTITY FULL;
+ALTER TABLE public.students REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'candidates'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.candidates;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'students'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.students;
+  END IF;
+END $$;
 
 -- ==============================================================================
 -- REFRESH SCHEMA CACHE POSTGREST (SANGAT PENTING!)

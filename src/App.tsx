@@ -18,11 +18,13 @@ import { ProgramsTrackerView } from './views/admin/ProgramsTrackerView';
 import { AttendanceView } from './views/admin/AttendanceView';
 import { DocumentsArchiveView } from './views/admin/DocumentsArchiveView';
 
+import { OFFICIAL_EOSIS_LOGO_SVG } from './components/EosisLogo';
+
 export default function App() {
   const [session, setSession] = useState<AuthSession>(null);
   const [settings, setSettings] = useState<Settings>({
     school_name: 'SMP Negeri 1 Dayun',
-    school_logo: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=300&q=80',
+    school_logo: OFFICIAL_EOSIS_LOGO_SVG,
     election_period: 'Masa Bakti 2026/2027',
     is_election_active: true,
     admin_username: 'admin',
@@ -48,6 +50,14 @@ export default function App() {
 
   useEffect(() => {
     initApp();
+
+    const handleReconnected = () => {
+      checkSupabase();
+    };
+    window.addEventListener('eosis_supabase_reconnected', handleReconnected);
+    return () => {
+      window.removeEventListener('eosis_supabase_reconnected', handleReconnected);
+    };
   }, []);
 
   const initApp = async () => {
