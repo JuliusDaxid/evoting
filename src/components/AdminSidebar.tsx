@@ -20,6 +20,8 @@ interface Props {
   isMobileOpen: boolean;
   onCloseMobile: () => void;
   electionPeriod: string;
+  isSuperAdmin?: boolean;
+  adminUsername?: string;
 }
 
 export const AdminSidebar: React.FC<Props> = ({
@@ -29,6 +31,8 @@ export const AdminSidebar: React.FC<Props> = ({
   isMobileOpen,
   onCloseMobile,
   electionPeriod,
+  isSuperAdmin = false,
+  adminUsername = 'admin',
 }) => {
   const electionItems: { key: AdminMenuKey; label: string; icon: string; badge?: string }[] = [
     { key: 'beranda', label: 'Beranda', icon: 'bi-grid-1x2-fill' },
@@ -64,12 +68,23 @@ export const AdminSidebar: React.FC<Props> = ({
       >
         {/* Top Section */}
         <div className="p-4 space-y-5">
-          <div className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-blue-900/60 to-indigo-900/40 border border-blue-500/30">
-            <span className="text-[10px] uppercase font-bold text-blue-300 tracking-wider block">
-              Panel Administrator OSIS
-            </span>
-            <span className="text-xs font-extrabold text-white block truncate">
-              {electionPeriod || 'Masa Bakti 2026/2027'}
+          <div className={`px-3.5 py-2.5 rounded-2xl border ${
+            isSuperAdmin
+              ? 'bg-gradient-to-r from-purple-900/80 via-indigo-900/80 to-slate-900 border-purple-500/40 shadow-md shadow-purple-900/20'
+              : 'bg-gradient-to-r from-blue-900/60 to-indigo-900/40 border-blue-500/30'
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className={`text-[10px] uppercase font-bold tracking-wider block ${isSuperAdmin ? 'text-amber-300' : 'text-blue-300'}`}>
+                {isSuperAdmin ? 'SUPER ADMIN RAHASIA' : 'Panel Administrator OSIS'}
+              </span>
+              {isSuperAdmin && (
+                <span className="text-[9px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black tracking-wide uppercase">
+                  VIP
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-extrabold text-white block truncate mt-0.5">
+              {isSuperAdmin ? `Akun: ${adminUsername} (Akses Penuh)` : (electionPeriod || 'Masa Bakti 2026/2027')}
             </span>
           </div>
 

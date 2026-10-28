@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { dbService } from '../../services/dbService';
-import { Settings } from '../../types';
+import { ChangelogItem, CreditsInfo, Settings } from '../../types';
 import {
   getActiveSupabaseConfig,
   saveSupabaseConfig,
@@ -17,6 +17,8 @@ interface Props {
   onOpenSupabaseGuide: () => void;
   supabaseStatus: { isConnected: boolean; tablesFound: boolean; message: string };
   onRefreshSupabaseStatus: () => void;
+  isSuperAdmin?: boolean;
+  currentAdminUsername?: string;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -25,8 +27,13 @@ export const SettingsView: React.FC<Props> = ({
   onOpenSupabaseGuide,
   supabaseStatus,
   onRefreshSupabaseStatus,
+  isSuperAdmin = false,
+  currentAdminUsername = 'admin',
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'account' | 'supabase'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'account' | 'supabase' | 'changelog' | 'credits'>('general');
+
+  // Can this user edit changelog and credits? Exclusive for username Albi2012 or isSuperAdmin
+  const canEditChangelogAndCredits = isSuperAdmin || currentAdminUsername === 'Albi2012';
 
   // General settings state
   const [schoolName, setSchoolName] = useState(settings.school_name || 'SMP Negeri 1 Dayun');
@@ -60,6 +67,171 @@ export const SettingsView: React.FC<Props> = ({
   // Status indicators
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Changelog & Credits state
+  const [changelogs, setChangelogs] = useState<ChangelogItem[]>([]);
+  const [credits, setCredits] = useState<CreditsInfo | null>(null);
+  const [loadingMeta, setLoadingMeta] = useState(false);
+
+  // Changelog modal & action states
+  const [isChangelogModalOpen, setIsChangelogModalOpen] = useState(false);
+  const [editingChangelog, setEditingChangelog] = useState<ChangelogItem | null>(null);
+  const [changelogToDelete, setChangelogToDelete] = useState<ChangelogItem | null>(null);
+
+  const [clVersion, setClVersion] = useState('');
+  const [clDate, setClDate] = useState(new Date().toISOString().split('T')[0]);
+  const [clTitle, setClTitle] = useState('');
+  const [clType, setClType] = useState<'major' | 'feature' | 'improvement' | 'fix'>('feature');
+  const [clSummary, setClSummary] = useState('');
+  const [clChangesText, setClChangesText] = useState('');
+
+  // Credits edit state
+  const [isEditingCredits, setIsEditingCredits] = useState(false);
+  const [creditDevName, setCreditDevName] = useState('');
+  const [creditLeadRole, setCreditLeadRole] = useState('');
+  const [creditInstitution, setCreditInstitution] = useState('');
+  const [creditSupervisor, setCreditSupervisor] = useState('');
+  const [creditContact, setCreditContact] = useState('');
+  const [creditNotes, setCreditNotes] = useState('');
+  const [creditAck, setCreditAck] = useState('');
+
+  useEffect(() => {
+    loadChangelogAndCredits();
+  }, []);
+
+  const loadChangelogAndCredits = async () => {
+    setLoadingMeta(true);
+    try {
+      const [cls, crd] = await Promise.all([
+        dbService.getChangelog(),
+        dbService.getCredits(),
+      ]);
+      setChangelogs(cls);
+      setCredits(crd);
+      if (crd) {
+        setCreditDevName(crd.developer_name);
+        setCreditLeadRole(crd.lead_role);
+        setCreditInstitution(crd.institution);
+        setCreditSupervisor(crd.supervisor);
+        setCreditContact(crd.contact_email);
+        setCreditNotes(crd.special_notes);
+        setCreditAck(crd.acknowledgments);
+      }
+    } catch (e) {
+      console.warn('Failed to load changelog and credits', e);
+    } finally {
+      setLoadingMeta(false);
+    }
+  };
+
+  const openAddChangelogModal = () => {
+    setEditingChangelog(null);
+    setClVersion('');
+    setClDate(new Date().toISOString().split('T')[0]);
+    setClTitle('');
+    setClType('feature');
+    setClSummary('');
+    setClChangesText('');
+    setIsChangelogModalOpen(true);
+  };
+
+  const openEditChangelogModal = (item: ChangelogItem) => {
+    setEditingChangelog(item);
+    setClVersion(item.version);
+    setClDate(item.release_date);
+    setClTitle(item.title);
+    setClType(item.type);
+    setClSummary(item.summary);
+    setClChangesText(item.changes ? item.changes.join('\n') : '');
+    setIsChangelogModalOpen(true);
+  };
+
+  const handleSaveChangelog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditChangelogAndCredits) return;
+    try {
+      const changesArr = clChangesText
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+      if (editingChangelog) {
+        // Mode Edit Changelog yang sudah ada
+        const updated = await dbService.updateChangelogItem(editingChangelog.id, {
+          version: clVersion.trim(),
+          release_date: clDate,
+          title: clTitle.trim(),
+          type: clType,
+          summary: clSummary.trim(),
+          changes: changesArr,
+        });
+
+        setChangelogs(changelogs.map(c => (c.id === editingChangelog.id ? updated : c)));
+        setIsChangelogModalOpen(false);
+        setEditingChangelog(null);
+        setStatusMessage({ text: `Riwayat versi ${updated.version} berhasil diperbarui!`, isError: false });
+      } else {
+        // Mode Tambah Changelog Baru
+        const newItem = await dbService.addChangelogItem({
+          version: clVersion.trim(),
+          release_date: clDate,
+          title: clTitle.trim(),
+          type: clType,
+          summary: clSummary.trim(),
+          changes: changesArr,
+          author: currentAdminUsername || 'Albi2012',
+        });
+
+        setChangelogs([newItem, ...changelogs]);
+        setIsChangelogModalOpen(false);
+        setStatusMessage({ text: `Riwayat versi ${newItem.version} berhasil ditambahkan!`, isError: false });
+      }
+
+      setClVersion('');
+      setClTitle('');
+      setClSummary('');
+      setClChangesText('');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal menyimpan catatan changelog';
+      setStatusMessage({ text: msg, isError: true });
+    }
+  };
+
+  const handleConfirmDeleteChangelog = async () => {
+    if (!changelogToDelete || !canEditChangelogAndCredits) return;
+    try {
+      await dbService.deleteChangelogItem(changelogToDelete.id);
+      setChangelogs(changelogs.filter(c => c.id !== changelogToDelete.id));
+      const deletedVer = changelogToDelete.version;
+      setChangelogToDelete(null);
+      setStatusMessage({ text: `Riwayat versi ${deletedVer} berhasil dihapus.`, isError: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Gagal menghapus changelog';
+      setStatusMessage({ text: msg, isError: true });
+    }
+  };
+
+  const handleSaveCredits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditChangelogAndCredits) return;
+    try {
+      const updated = await dbService.updateCredits({
+        developer_name: creditDevName.trim(),
+        lead_role: creditLeadRole.trim(),
+        institution: creditInstitution.trim(),
+        supervisor: creditSupervisor.trim(),
+        contact_email: creditContact.trim(),
+        special_notes: creditNotes.trim(),
+        acknowledgments: creditAck.trim(),
+      });
+      setCredits(updated);
+      setIsEditingCredits(false);
+      setStatusMessage({ text: 'Informasi pengembang & credits berhasil diperbarui!', isError: false });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal memperbarui credits';
+      setStatusMessage({ text: msg, isError: true });
+    }
+  };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -164,11 +336,11 @@ export const SettingsView: React.FC<Props> = ({
       )}
 
       {/* Settings Navigation Tabs */}
-      <div className="flex p-1.5 bg-slate-200/60 rounded-2xl max-w-xl">
+      <div className="flex flex-wrap p-1.5 bg-slate-200/70 rounded-2xl gap-1 max-w-4xl">
         <button
           type="button"
           onClick={() => setActiveTab('general')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'general' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
@@ -179,7 +351,7 @@ export const SettingsView: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setActiveTab('account')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'account' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
@@ -190,12 +362,34 @@ export const SettingsView: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setActiveTab('supabase')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'supabase' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <i className="bi bi-database-check"></i>
           <span>Database Supabase</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('changelog')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'changelog' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <i className="bi bi-clock-history"></i>
+          <span>Riwayat Versi (Changelog)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('credits')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'credits' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <i className="bi bi-code-slash"></i>
+          <span>Credits Pengembang</span>
         </button>
       </div>
 
@@ -793,6 +987,548 @@ export const SettingsView: React.FC<Props> = ({
               </li>
             </ul>
           </div>
+        </div>
+      )}
+
+      {/* TAB 4: RIWAYAT VERSI (CHANGELOG) */}
+      {activeTab === 'changelog' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                <i className="bi bi-clock-history text-blue-600"></i>
+                <span>Riwayat Pembaruan Sistem (Changelog)</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Catatan komprehensif riwayat versi, penambahan fitur, dan peningkatan performa sistem eOSIS.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {canEditChangelogAndCredits ? (
+                <button
+                  type="button"
+                  onClick={openAddChangelogModal}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <i className="bi bi-plus-circle"></i>
+                  <span>Tambah Catatan Versi</span>
+                </button>
+              ) : (
+                <div className="px-3 py-1.5 bg-slate-100 text-slate-500 text-[11px] font-semibold rounded-xl border border-slate-200 flex items-center gap-1.5">
+                  <i className="bi bi-lock-fill text-slate-400"></i>
+                  <span>Read-Only • Khusus Albi2012</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {canEditChangelogAndCredits && (
+            <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center gap-2 text-xs text-purple-900">
+              <i className="bi bi-shield-check text-purple-600 shrink-0 text-base"></i>
+              <span>
+                <strong>Akses Editor Aktif:</strong> Anda login sebagai akun <strong>{currentAdminUsername}</strong> dan memiliki wewenang untuk menambah serta mengelola riwayat versi.
+              </span>
+            </div>
+          )}
+
+          {/* Changelog Timeline */}
+          {loadingMeta ? (
+            <div className="py-12 text-center text-xs text-slate-500">
+              <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+              Memuat riwayat versi...
+            </div>
+          ) : (
+            <div className="space-y-6 relative before:absolute before:inset-0 before:left-3.5 before:w-0.5 before:bg-slate-200">
+              {changelogs.map((item) => {
+                const badgeColor =
+                  item.type === 'major'
+                    ? 'bg-purple-100 text-purple-800 border-purple-200'
+                    : item.type === 'feature'
+                    ? 'bg-blue-100 text-blue-800 border-blue-200'
+                    : item.type === 'improvement'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                    : 'bg-amber-100 text-amber-800 border-amber-200';
+
+                return (
+                  <div key={item.id} className="relative pl-8 space-y-2 group">
+                    {/* Timeline bullet */}
+                    <div className="absolute left-1.5 top-1.5 w-4 h-4 rounded-full bg-white border-4 border-blue-600 shadow-xs"></div>
+
+                    <div className="p-5 bg-slate-50/70 hover:bg-slate-50 rounded-2xl border border-slate-200 transition space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-extrabold text-sm text-slate-900 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                            {item.version}
+                          </span>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${badgeColor}`}>
+                            {item.type}
+                          </span>
+                          <span className="text-xs font-bold text-slate-800">
+                            {item.title}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <span>{item.release_date}</span>
+                          {item.author && (
+                            <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-[10px] font-semibold">
+                              by {item.author}
+                            </span>
+                          )}
+                          {canEditChangelogAndCredits && (
+                            <div className="flex items-center gap-1.5 ml-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditChangelogModal(item)}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg transition text-xs font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Edit catatan versi ini"
+                              >
+                                <i className="bi bi-pencil-square"></i>
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setChangelogToDelete(item)}
+                                className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition text-xs font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Hapus catatan versi ini"
+                              >
+                                <i className="bi bi-trash-fill"></i>
+                                <span>Hapus</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                        {item.summary}
+                      </p>
+
+                      {item.changes && item.changes.length > 0 && (
+                        <div className="pt-2 border-t border-slate-200/60">
+                          <ul className="space-y-1.5 text-xs text-slate-600">
+                            {item.changes.map((change, cIdx) => (
+                              <li key={cIdx} className="flex items-start gap-2">
+                                <i className="bi bi-check-circle-fill text-blue-600 text-[11px] shrink-0 mt-0.5"></i>
+                                <span className="leading-snug">{change}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ADD / EDIT CHANGELOG MODAL */}
+          {isChangelogModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+              <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 animate-scale-up">
+                <form onSubmit={handleSaveChangelog}>
+                  <div className="p-5 bg-gradient-to-r from-blue-700 to-indigo-700 text-white flex items-center justify-between">
+                    <h4 className="font-extrabold text-sm flex items-center gap-2">
+                      <i className={`bi ${editingChangelog ? 'bi-pencil-square' : 'bi-plus-circle'}`}></i>
+                      <span>{editingChangelog ? `Edit Catatan Versi (${editingChangelog.version})` : 'Tambah Catatan Versi Baru'}</span>
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangelogModalOpen(false);
+                        setEditingChangelog(null);
+                      }}
+                      className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
+                    >
+                      <i className="bi bi-x-lg text-xs"></i>
+                    </button>
+                  </div>
+
+                  <div className="p-6 space-y-4 text-xs max-h-[75vh] overflow-y-auto">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Nomor Versi *</label>
+                        <input
+                          type="text"
+                          required
+                          value={clVersion}
+                          onChange={(e) => setClVersion(e.target.value)}
+                          placeholder="Contoh: v3.0"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Tanggal Rilis *</label>
+                        <input
+                          type="date"
+                          required
+                          value={clDate}
+                          onChange={(e) => setClDate(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Tipe Pembaruan</label>
+                        <select
+                          value={clType}
+                          onChange={(e) => setClType(e.target.value as any)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white"
+                        >
+                          <option value="major">Major (Pembaruan Besar)</option>
+                          <option value="feature">Feature (Fitur Baru)</option>
+                          <option value="improvement">Improvement (Peningkatan)</option>
+                          <option value="fix">Fix (Perbaikan Bug)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Judul Rilis *</label>
+                        <input
+                          type="text"
+                          required
+                          value={clTitle}
+                          onChange={(e) => setClTitle(e.target.value)}
+                          placeholder="Contoh: Bilik Suara Presisi & Changelog"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">Ringkasan Pembaruan *</label>
+                      <textarea
+                        required
+                        rows={2}
+                        value={clSummary}
+                        onChange={(e) => setClSummary(e.target.value)}
+                        placeholder="Deskripsi singkat mengenai versi ini..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">
+                        Daftar Perubahan (Satu baris per poin) *
+                      </label>
+                      <textarea
+                        required
+                        rows={4}
+                        value={clChangesText}
+                        onChange={(e) => setClChangesText(e.target.value)}
+                        placeholder="Bilik suara paslon ditampilkan 1 baris penuh&#10;Audit coblosan siswa untuk super admin&#10;Optimasi responsivitas mobile"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangelogModalOpen(false);
+                        setEditingChangelog(null);
+                      }}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-md cursor-pointer"
+                    >
+                      {editingChangelog ? 'Simpan Perubahan Versi' : 'Simpan Catatan Versi'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* DELETE CHANGELOG CONFIRMATION MODAL (Non-blocking Dialog) */}
+          {changelogToDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+              <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 animate-scale-up">
+                <div className="p-6 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto text-3xl shadow-inner">
+                    <i className="bi bi-trash3-fill"></i>
+                  </div>
+
+                  <div>
+                    <h4 className="text-lg font-extrabold text-slate-800">
+                      Hapus Catatan Versi?
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Apakah Anda yakin ingin menghapus catatan rilis{' '}
+                      <strong className="text-slate-800 font-bold">{changelogToDelete.version} - {changelogToDelete.title}</strong>?
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-left text-xs text-rose-800 flex items-start gap-2">
+                    <i className="bi bi-exclamation-triangle-fill text-rose-600 shrink-0 mt-0.5"></i>
+                    <p className="text-[11px] leading-relaxed">
+                      Data riwayat pembaruan ini akan dihapus secara permanen dari sistem eOSIS.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setChangelogToDelete(null)}
+                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDeleteChangelog}
+                    className="px-5 py-2 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 active:scale-95 rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <i className="bi bi-trash-fill"></i>
+                    <span>Ya, Hapus Versi</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: CREDITS PENGEMBANG */}
+      {activeTab === 'credits' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                <i className="bi bi-code-slash text-blue-600"></i>
+                <span>Credits &amp; Informasi Pengembang</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Informasi resmi perancang, pengembang sistem, dan pembina eOSIS SMP Negeri 1 Dayun.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {canEditChangelogAndCredits ? (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingCredits(!isEditingCredits)}
+                  className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
+                    isEditingCredits
+                      ? 'bg-slate-200 text-slate-800 hover:bg-slate-300'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 shadow-xs'
+                  }`}
+                >
+                  <i className={`bi ${isEditingCredits ? 'bi-x-lg' : 'bi-pencil-square'}`}></i>
+                  <span>{isEditingCredits ? 'Batal Edit' : 'Edit Informasi Credits'}</span>
+                </button>
+              ) : (
+                <div className="px-3 py-1.5 bg-slate-100 text-slate-500 text-[11px] font-semibold rounded-xl border border-slate-200 flex items-center gap-1.5">
+                  <i className="bi bi-lock-fill text-slate-400"></i>
+                  <span>Read-Only • Khusus Albi2012</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {canEditChangelogAndCredits && !isEditingCredits && (
+            <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center gap-2 text-xs text-purple-900">
+              <i className="bi bi-shield-check text-purple-600 shrink-0 text-base"></i>
+              <span>
+                <strong>Super Admin Hak Penuh:</strong> Anda dapat mengedit profil pengembang, peran, dan catatan khusus sistem ini kapan saja.
+              </span>
+            </div>
+          )}
+
+          {isEditingCredits ? (
+            /* EDIT FORM */
+            <form onSubmit={handleSaveCredits} className="space-y-4 max-w-2xl text-xs">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Nama Pengembang *</label>
+                  <input
+                    type="text"
+                    required
+                    value={creditDevName}
+                    onChange={(e) => setCreditDevName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Peran Utama *</label>
+                  <input
+                    type="text"
+                    required
+                    value={creditLeadRole}
+                    onChange={(e) => setCreditLeadRole(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Asal Sekolah / Lembaga *</label>
+                  <input
+                    type="text"
+                    required
+                    value={creditInstitution}
+                    onChange={(e) => setCreditInstitution(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Guru Pembina / Pembimbing *</label>
+                  <input
+                    type="text"
+                    required
+                    value={creditSupervisor}
+                    onChange={(e) => setCreditSupervisor(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Kontak Email Pengembang</label>
+                <input
+                  type="email"
+                  value={creditContact}
+                  onChange={(e) => setCreditContact(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Ucapan Terima Kasih (Acknowledgments)</label>
+                <textarea
+                  rows={3}
+                  value={creditAck}
+                  onChange={(e) => setCreditAck(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Catatan Khusus Sistem</label>
+                <textarea
+                  rows={3}
+                  value={creditNotes}
+                  onChange={(e) => setCreditNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingCredits(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition shadow-md cursor-pointer"
+                >
+                  Simpan Perubahan Credits
+                </button>
+              </div>
+            </form>
+          ) : credits ? (
+            /* VIEW CREDITS CARD */
+            <div className="space-y-6">
+              <div className="grid md:grid-cols-12 gap-6 items-stretch">
+                {/* Developer Profile Card */}
+                <div className="md:col-span-5 bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-900 text-white p-6 sm:p-7 rounded-3xl relative overflow-hidden flex flex-col justify-between shadow-lg">
+                  <div className="absolute top-0 right-0 w-40 h-40 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+                  <div className="relative z-10 space-y-4">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur border border-white/20 text-[10px] font-bold text-amber-300">
+                      <i className="bi bi-star-fill text-amber-400"></i>
+                      <span>Creator &amp; Lead Architect</span>
+                    </div>
+
+                    <div>
+                      <h4 className="text-2xl font-black tracking-tight text-white">
+                        {credits.developer_name}
+                      </h4>
+                      <p className="text-xs text-blue-200 font-semibold mt-0.5">
+                        {credits.lead_role}
+                      </p>
+                      <p className="text-xs text-slate-300 mt-1">
+                        {credits.institution}
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-white/15 space-y-2 text-xs">
+                      <div className="flex items-center gap-2 text-slate-200">
+                        <i className="bi bi-person-badge text-blue-300"></i>
+                        <span>Pembimbing: {credits.supervisor}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-200">
+                        <i className="bi bi-envelope text-blue-300"></i>
+                        <span className="font-mono text-[11px]">{credits.contact_email}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative z-10 pt-6 mt-4 border-t border-white/15 flex items-center justify-between text-[11px] text-slate-300">
+                    <span className="font-mono">{credits.version_code}</span>
+                    <span>Tahun {credits.release_year}</span>
+                  </div>
+                </div>
+
+                {/* System & Architecture Stack */}
+                <div className="md:col-span-7 space-y-4 flex flex-col justify-between">
+                  <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                    <h5 className="font-extrabold text-xs text-slate-800 flex items-center gap-2">
+                      <i className="bi bi-cpu-fill text-blue-600"></i>
+                      <span>Teknologi &amp; Framework Pendukung</span>
+                    </h5>
+                    <div className="flex flex-wrap gap-1.5">
+                      {credits.tech_stack.map((tech, tIdx) => (
+                        <span
+                          key={tIdx}
+                          className="px-2.5 py-1 bg-white text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 shadow-2xs"
+                        >
+                          {tech}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-5 bg-blue-50/70 rounded-2xl border border-blue-200/80 space-y-2 text-xs">
+                    <span className="font-extrabold text-blue-900 block flex items-center gap-1.5">
+                      <i className="bi bi-chat-quote-fill text-blue-600"></i>
+                      <span>Ucapan Terima Kasih:</span>
+                    </span>
+                    <p className="text-slate-700 leading-relaxed italic">
+                      &ldquo;{credits.acknowledgments}&rdquo;
+                    </p>
+                  </div>
+
+                  <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+                    <span className="font-extrabold text-slate-800 block flex items-center gap-1.5">
+                      <i className="bi bi-info-circle-fill text-indigo-600"></i>
+                      <span>Catatan Khusus Sistem:</span>
+                    </span>
+                    <p className="text-slate-600 leading-relaxed">
+                      {credits.special_notes}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-10 text-xs text-slate-400">
+              Data credits belum tersedia.
+            </div>
+          )}
         </div>
       )}
     </div>

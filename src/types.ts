@@ -54,9 +54,62 @@ export interface StudentSession {
 export interface AdminSession {
   role: 'admin';
   username: string;
+  isSuperAdmin?: boolean;
 }
 
 export type AuthSession = StudentSession | AdminSession | null;
+
+// ==========================================
+// SUPER ADMIN & AUDIT TYPES
+// ==========================================
+
+export interface BallotAuditRecord {
+  id: string;
+  student_id: string;
+  nisn: string;
+  student_name: string;
+  class_name: string;
+  candidate_id: string;
+  candidate_number: number;
+  candidate_names: string;
+  voted_at: string;
+}
+
+export interface DptBallotAuditItem {
+  student: Student;
+  ballot?: BallotAuditRecord | null;
+  candidate?: Candidate | null;
+}
+
+// ==========================================
+// CHANGELOG & CREDITS
+// ==========================================
+
+export interface ChangelogItem {
+  id: string;
+  version: string;
+  release_date: string;
+  title: string;
+  type: 'major' | 'feature' | 'improvement' | 'fix';
+  summary: string;
+  changes: string[];
+  author?: string;
+  created_at?: string;
+}
+
+export interface CreditsInfo {
+  developer_name: string;
+  lead_role: string;
+  institution: string;
+  supervisor: string;
+  version_code: string;
+  release_year: string;
+  contact_email: string;
+  tech_stack: string[];
+  acknowledgments: string;
+  special_notes: string;
+  last_updated?: string;
+}
 
 // ==========================================
 // MODUL INTERNAL PENGURUS OSIS

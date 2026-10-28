@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { dbService } from '../../services/dbService';
-import { ClassItem, Student } from '../../types';
+import { BallotAuditRecord, ClassItem, Student } from '../../types';
 
-export const StudentsManagement: React.FC = () => {
+interface Props {
+  isSuperAdmin?: boolean;
+}
+
+export const StudentsManagement: React.FC<Props> = ({ isSuperAdmin = false }) => {
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [ballotAudits, setBallotAudits] = useState<BallotAuditRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -67,12 +72,14 @@ export const StudentsManagement: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [studentList, classList] = await Promise.all([
+      const [studentList, classList, auditList] = await Promise.all([
         dbService.getStudents(),
         dbService.getClasses(),
+        dbService.getBallotAuditRecords(),
       ]);
       setStudents(studentList);
       setClasses(classList);
+      setBallotAudits(auditList);
     } catch (err) {
       console.error('Failed to load students data', err);
     } finally {
@@ -510,6 +517,32 @@ export const StudentsManagement: React.FC = () => {
         </div>
       </div>
 
+      {/* SUPER ADMIN SECRET AUDIT BANNER */}
+      {isSuperAdmin && (
+        <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-4 rounded-2xl border border-purple-500/40 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/30 text-amber-300 flex items-center justify-center text-xl shrink-0 border border-purple-400/30">
+              <i className="bi bi-shield-lock-fill"></i>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-sm text-white">Mode Rahasia Super Admin (Albi2012) Aktif</span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                  Audit Terbuka
+                </span>
+              </div>
+              <p className="text-xs text-purple-200 mt-0.5 leading-relaxed">
+                Anda memiliki akses khusus untuk memantau audit pilihan pasangan calon yang dicoblos oleh masing-masing siswa DPT. Akses ini dikunci total untuk akun admin biasa.
+              </p>
+            </div>
+          </div>
+          <div className="px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur border border-white/20 text-xs font-bold text-amber-300 shrink-0 flex items-center gap-1.5">
+            <i className="bi bi-key-fill text-amber-400"></i>
+            <span>Hak Akses Eksklusif</span>
+          </div>
+        </div>
+      )}
+
       {/* Quick Summary Badges */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-center">
@@ -619,6 +652,14 @@ export const StudentsManagement: React.FC = () => {
                   <th className="py-3 px-3 w-20">Kelas</th>
                   <th className="py-3 px-3">Alamat</th>
                   <th className="py-3 px-3 text-center w-28">Status Suara</th>
+                  {isSuperAdmin && (
+                    <th className="py-3 px-3 text-center w-48 bg-purple-100 text-purple-900 border-l border-purple-200">
+                      <span className="inline-flex items-center gap-1.5 font-bold">
+                        <i className="bi bi-shield-shaded text-purple-600"></i>
+                        <span>Pilihan Paslon (Super Admin)</span>
+                      </span>
+                    </th>
+                  )}
                   <th className="py-3 px-3 text-center w-24">Aksi</th>
                 </tr>
               </thead>
@@ -682,6 +723,34 @@ export const StudentsManagement: React.FC = () => {
                         </span>
                       )}
                     </td>
+                    {isSuperAdmin && (
+                      <td className="py-3 px-3 text-center bg-purple-50/40 border-l border-purple-100">
+                        {s.has_voted ? (
+                          (() => {
+                            const audit = ballotAudits.find(a => a.student_id === s.id || a.nisn === s.nisn);
+                            if (audit) {
+                              return (
+                                <div className="inline-flex flex-col items-center">
+                                  <span className="px-2.5 py-0.5 rounded-full bg-purple-600 text-white font-black text-[10px] shadow-xs">
+                                    Paslon No. {audit.candidate_number}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-700 truncate max-w-[150px] block mt-0.5" title={audit.candidate_names}>
+                                    {audit.candidate_names}
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 italic">
+                                <i className="bi bi-check2"></i> Pilihan Tercatat
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-[10px] text-slate-400 italic">Belum Memilih</span>
+                        )}
+                      </td>
+                    )}
                     <td className="py-3 px-3 text-center">
                       <div className="flex items-center justify-center gap-1">
                         {s.has_voted && (

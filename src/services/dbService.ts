@@ -1,7 +1,11 @@
 import { supabase } from '../lib/supabase';
 import {
+  BallotAuditRecord,
   Candidate,
+  ChangelogItem,
   ClassItem,
+  CreditsInfo,
+  DptBallotAuditItem,
   OsisAttendance,
   OsisDocument,
   OsisMeeting,
@@ -421,6 +425,161 @@ const INITIAL_OSIS_DOCUMENTS: OsisDocument[] = [
   },
 ];
 
+const INITIAL_BALLOT_AUDIT: BallotAuditRecord[] = [
+  {
+    id: 'ba-01',
+    student_id: 's01',
+    nisn: '0081234501',
+    student_name: 'Ahmad Rizky Fauzi',
+    class_name: 'VII A',
+    candidate_id: 'c1111111-1111-1111-1111-111111111101',
+    candidate_number: 1,
+    candidate_names: 'Muhammad Farhan Pratama & Alya Siti Nurhaliza',
+    voted_at: '2026-10-23T08:30:00.000Z',
+  },
+  {
+    id: 'ba-02',
+    student_id: 's03',
+    nisn: '0081234503',
+    student_name: 'Bima Sakti Nugraha',
+    class_name: 'VII B',
+    candidate_id: 'c1111111-1111-1111-1111-111111111102',
+    candidate_number: 2,
+    candidate_names: 'Bagas Aditya Wardana & Zahra Cantika Putri',
+    voted_at: '2026-10-23T08:45:00.000Z',
+  },
+  {
+    id: 'ba-03',
+    student_id: 's05',
+    nisn: '0081234505',
+    student_name: 'Dimas Pratama',
+    class_name: 'VIII A',
+    candidate_id: 'c1111111-1111-1111-1111-111111111102',
+    candidate_number: 2,
+    candidate_names: 'Bagas Aditya Wardana & Zahra Cantika Putri',
+    voted_at: '2026-10-23T09:10:00.000Z',
+  },
+  {
+    id: 'ba-04',
+    student_id: 's07',
+    nisn: '0081234507',
+    student_name: 'Fajar Ramadhan',
+    class_name: 'VIII B',
+    candidate_id: 'c1111111-1111-1111-1111-111111111101',
+    candidate_number: 1,
+    candidate_names: 'Muhammad Farhan Pratama & Alya Siti Nurhaliza',
+    voted_at: '2026-10-23T09:20:00.000Z',
+  },
+  {
+    id: 'ba-05',
+    student_id: 's09',
+    nisn: '0081234509',
+    student_name: 'Hendra Setiawan',
+    class_name: 'IX A',
+    candidate_id: 'c1111111-1111-1111-1111-111111111103',
+    candidate_number: 3,
+    candidate_names: 'Rifky Dwi Hermansyah & Nabila Aurelia Maharani',
+    voted_at: '2026-10-23T09:40:00.000Z',
+  },
+  {
+    id: 'ba-06',
+    student_id: 's11',
+    nisn: '0081234511',
+    student_name: 'Kevin Julius',
+    class_name: 'IX B',
+    candidate_id: 'c1111111-1111-1111-1111-111111111102',
+    candidate_number: 2,
+    candidate_names: 'Bagas Aditya Wardana & Zahra Cantika Putri',
+    voted_at: '2026-10-23T10:00:00.000Z',
+  },
+];
+
+const INITIAL_CHANGELOG: ChangelogItem[] = [
+  {
+    id: 'cl-29',
+    version: 'v2.9',
+    release_date: '2026-10-28',
+    title: 'Bilik Suara 1 Baris Penuh, Super Admin Audit (Albi2012) & Changelog/Credits',
+    type: 'major',
+    summary: 'Pembaruan bilik suara presisi satu baris penuh tanpa scroll, sistem super admin rahasia dengan audit coblosan DPT, dan modul riwayat versi serta informasi pengembang eksklusif.',
+    changes: [
+      'Bilik Suara (Voting Booth): Paslon kini ditampilkan horizontal dalam 1 baris tanpa turun ke bawah dan dapat dilihat seluruhnya tanpa perlu scroll atau geser layar.',
+      'Sistem Super Admin Rahasia: Akses login Albi2012 / 201211 membuka panel khusus untuk melihat rincian DPT dan kandidat paslon yang dipilih oleh masing-masing siswa.',
+      'Menu Changelog & Credits: Riwayat pembaruan dan kredit sistem di Pengaturan Sistem kini dapat dikelola dan diedit eksklusif oleh akun Albi2012.',
+      'Perlindungan Keamanan Ketat: Hak akses audit pilihan siswa dikunci total dan tidak dapat dilihat oleh akun admin biasa.'
+    ],
+    author: 'Albi2012',
+    created_at: '2026-10-28T09:00:00.000Z'
+  },
+  {
+    id: 'cl-28',
+    version: 'v2.8',
+    release_date: '2026-10-25',
+    title: 'Notulen Generator, Pagination Siswa, Kalender Proja & Optimistic Update',
+    type: 'feature',
+    summary: 'Penambahan fitur notulen otomatis terintegrasi absensi, sistem pagination interaktif data siswa, kalender program kerja, dan update data instan.',
+    changes: [
+      'Notulen Generator otomatis dengan ekspor PDF & Word dokumen serta penarikan presensi.',
+      'Pagination interaktif tabel siswa (15, 30, 50, dan custom rows per page).',
+      'Tampilan kalender interaktif untuk visualisasi dan tracking Program Kerja OSIS.',
+      'Optimistic state updates saat edit data siswa tanpa delay atau hard reload.'
+    ],
+    author: 'Albi2012',
+    created_at: '2026-10-25T14:30:00.000Z'
+  },
+  {
+    id: 'cl-27',
+    version: 'v2.7',
+    release_date: '2026-10-23',
+    title: 'Integrasi Supabase Realtime & Pemilihan Berbasis NISN',
+    type: 'improvement',
+    summary: 'Login pemilih disederhanakan hanya menggunakan NISN dengan validasi database yang ketat, serta sinkronisasi perolehan suara realtime.',
+    changes: [
+      'Login siswa mandiri dengan NISN tanpa perlu tanggal lahir.',
+      'Validasi anti-double voting di level database PostgreSQL.',
+      'Konfigurasi database Supabase langsung dari antarmuka web dengan pembersihan URL otomatis.',
+      'Realtime postgres_changes listener untuk update grafik perolehan suara tanpa refresh.'
+    ],
+    author: 'Albi2012',
+    created_at: '2026-10-23T11:00:00.000Z'
+  },
+  {
+    id: 'cl-25',
+    version: 'v2.5',
+    release_date: '2026-10-15',
+    title: 'Peluncuran Modul Internal Pengurus OSIS',
+    type: 'feature',
+    summary: 'Ekspansi modul aplikasi meliputi struktur pengurus, absensi digital, dan arsip dokumen kegiatan.',
+    changes: [
+      'Modul Struktur Pengurus OSIS lengkap dengan foto dan hierarki jabatan.',
+      'Modul Absensi Kegiatan dan Rapat OSIS berbasis status kehadiran.',
+      'E-Archive dokumen proposal, LPJ, dan surat dinas.'
+    ],
+    author: 'Tim Pengembang OSIS',
+    created_at: '2026-10-15T08:00:00.000Z'
+  }
+];
+
+const INITIAL_CREDITS: CreditsInfo = {
+  developer_name: 'Albi',
+  lead_role: 'Lead Full-Stack Developer & System Architect',
+  institution: 'SMP Negeri 1 Dayun',
+  supervisor: 'Drs. Hendro Wibowo, M.Pd. (Pembina OSIS)',
+  version_code: 'v2.9-dayun-edition',
+  release_year: '2026',
+  contact_email: 'albi.dev@smpn1dayun.sch.id',
+  tech_stack: [
+    'React 18 & TypeScript',
+    'Tailwind CSS',
+    'Supabase PostgreSQL & Realtime Channel',
+    'Lucide & Bootstrap Icons',
+    'Canvas Confetti'
+  ],
+  acknowledgments: 'Terima kasih sebesar-besarnya kepada Kepala Sekolah, Dewan Guru, Pembina OSIS, dan seluruh Panitia Pemilihan OSIS SMPN 1 Dayun atas bimbingan dan kepercayaannya.',
+  special_notes: 'Aplikasi eOSIS ini dirancang khusus untuk mewujudkan pemilihan kepemimpinan siswa yang jujur, adil, transparan, dan berteknologi tinggi di lingkungan SMP Negeri 1 Dayun.',
+  last_updated: '2026-10-28T09:00:00.000Z'
+};
+
 class DatabaseService {
   private isSupabaseReady: boolean = false;
   private hasCheckedSupabase: boolean = false;
@@ -472,6 +631,15 @@ class DatabaseService {
     }
     if (!localStorage.getItem('eosis_documents')) {
       localStorage.setItem('eosis_documents', JSON.stringify(INITIAL_OSIS_DOCUMENTS));
+    }
+    if (!localStorage.getItem('eosis_ballot_audit')) {
+      localStorage.setItem('eosis_ballot_audit', JSON.stringify(INITIAL_BALLOT_AUDIT));
+    }
+    if (!localStorage.getItem('eosis_changelog')) {
+      localStorage.setItem('eosis_changelog', JSON.stringify(INITIAL_CHANGELOG));
+    }
+    if (!localStorage.getItem('eosis_credits')) {
+      localStorage.setItem('eosis_credits', JSON.stringify(INITIAL_CREDITS));
     }
   }
 
@@ -719,6 +887,7 @@ class DatabaseService {
     const studentList = await this.getStudents();
     const resetStudents = studentList.map(s => ({ ...s, has_voted: false, voted_at: null }));
     localStorage.setItem('eosis_students', JSON.stringify(resetStudents));
+    localStorage.setItem('eosis_ballot_audit', '[]');
 
     if (this.isSupabaseReady) {
       try {
@@ -1224,7 +1393,7 @@ class DatabaseService {
           await supabase.from('candidates').update({ vote_count: currentCount + 1 }).eq('id', candidateId);
         }
 
-        this.updateLocalVoteState(studentId, candidateId);
+        this.updateLocalVoteState(studentId, candidateId, cleanNisn);
         return {
           success: true,
           message: rpcMessage || 'Suara Anda berhasil dicatat, terima kasih telah berpartisipasi!',
@@ -1258,6 +1427,9 @@ class DatabaseService {
     targetCandidate.vote_count = (targetCandidate.vote_count || 0) + 1;
     localStorage.setItem('eosis_candidates', JSON.stringify(candidates));
 
+    // Record secret ballot audit choice
+    this.recordBallotAudit(currentStudent.id, currentStudent.nisn, candidateId);
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eosis_vote_cast', { detail: { candidateId, studentId } }));
     }
@@ -1268,9 +1440,38 @@ class DatabaseService {
     };
   }
 
-  private updateLocalVoteState(studentId: string, candidateId: string) {
+  private recordBallotAudit(studentId: string, nisn: string, candidateId: string) {
+    try {
+      const students = JSON.parse(localStorage.getItem('eosis_students') || '[]') as Student[];
+      const s = students.find(item => item.id === studentId || item.nisn === nisn);
+      const cands = JSON.parse(localStorage.getItem('eosis_candidates') || '[]') as Candidate[];
+      const c = cands.find(item => item.id === candidateId);
+
+      const audits = JSON.parse(localStorage.getItem('eosis_ballot_audit') || '[]') as BallotAuditRecord[];
+      const filtered = audits.filter(a => a.student_id !== studentId && a.nisn !== (s?.nisn || nisn));
+
+      const newAudit: BallotAuditRecord = {
+        id: generateUUID(),
+        student_id: s?.id || studentId,
+        nisn: s?.nisn || nisn,
+        student_name: s?.name || 'Siswa Pemilih',
+        class_name: s?.class_name || 'Belum Ditentukan',
+        candidate_id: candidateId,
+        candidate_number: c?.candidate_number || 1,
+        candidate_names: c ? `${c.chairman_name} & ${c.vice_chairman_name}` : 'Paslon Terpilih',
+        voted_at: new Date().toISOString(),
+      };
+
+      filtered.push(newAudit);
+      localStorage.setItem('eosis_ballot_audit', JSON.stringify(filtered));
+    } catch (e) {
+      console.warn('Failed to record ballot audit', e);
+    }
+  }
+
+  private updateLocalVoteState(studentId: string, candidateId: string, nisn?: string) {
     const students = JSON.parse(localStorage.getItem('eosis_students') || '[]') as Student[];
-    const s = students.find(item => item.id === studentId);
+    const s = students.find(item => item.id === studentId || (nisn && item.nisn === nisn));
     if (s) {
       s.has_voted = true;
       s.voted_at = new Date().toISOString();
@@ -1283,6 +1484,9 @@ class DatabaseService {
       c.vote_count = (c.vote_count || 0) + 1;
       localStorage.setItem('eosis_candidates', JSON.stringify(cands));
     }
+
+    // Record secret ballot audit
+    this.recordBallotAudit(s?.id || studentId, s?.nisn || (nisn || ''), candidateId);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eosis_vote_cast', { detail: { candidateId, studentId } }));
@@ -1640,6 +1844,65 @@ class DatabaseService {
         console.warn('Failed to delete osis_document from Supabase', e);
       }
     }
+  }
+
+  // ==========================================
+  // SUPER ADMIN AUDIT: PILIHAN PASLON DPT
+  // ==========================================
+  async getBallotAuditRecords(): Promise<BallotAuditRecord[]> {
+    const stored = localStorage.getItem('eosis_ballot_audit');
+    return stored ? JSON.parse(stored) : INITIAL_BALLOT_AUDIT;
+  }
+
+  // ==========================================
+  // CHANGELOG & CREDITS
+  // ==========================================
+  async getChangelog(): Promise<ChangelogItem[]> {
+    const stored = localStorage.getItem('eosis_changelog');
+    return stored ? JSON.parse(stored) : INITIAL_CHANGELOG;
+  }
+
+  async addChangelogItem(item: Omit<ChangelogItem, 'id' | 'created_at'>): Promise<ChangelogItem> {
+    const newItem: ChangelogItem = {
+      ...item,
+      id: generateUUID(),
+      created_at: new Date().toISOString(),
+    };
+    const list = await this.getChangelog();
+    list.unshift(newItem);
+    localStorage.setItem('eosis_changelog', JSON.stringify(list));
+    return newItem;
+  }
+
+  async updateChangelogItem(id: string, item: Partial<ChangelogItem>): Promise<ChangelogItem> {
+    const list = await this.getChangelog();
+    const idx = list.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Data riwayat versi tidak ditemukan');
+    list[idx] = { ...list[idx], ...item };
+    localStorage.setItem('eosis_changelog', JSON.stringify(list));
+    return list[idx];
+  }
+
+  async deleteChangelogItem(id: string): Promise<void> {
+    let list = await this.getChangelog();
+    list = list.filter(c => c.id !== id);
+    localStorage.setItem('eosis_changelog', JSON.stringify(list));
+  }
+
+  async getCredits(): Promise<CreditsInfo> {
+    const stored = localStorage.getItem('eosis_credits');
+    return stored ? JSON.parse(stored) : INITIAL_CREDITS;
+  }
+
+  async updateCredits(credits: Partial<CreditsInfo>): Promise<CreditsInfo> {
+    const current = await this.getCredits();
+    const updated: CreditsInfo = {
+      ...current,
+      ...credits,
+      last_updated: new Date().toISOString(),
+    };
+    localStorage.setItem('eosis_credits', JSON.stringify(updated));
+    return updated;
   }
 
   // --- SYNC ALL TO SUPABASE ---

@@ -120,7 +120,7 @@ export default function App() {
           </main>
         ) : session.role === 'student' ? (
           /* STUDENT VIEWS */
-          <main className="flex-1">
+          <main className={`flex-1 flex flex-col ${studentView === 'booth' ? 'overflow-hidden' : ''}`}>
             {studentView === 'dashboard' ? (
               <StudentDashboard
                 student={session.student}
@@ -163,6 +163,8 @@ export default function App() {
               isMobileOpen={isMobileSidebarOpen}
               onCloseMobile={() => setIsMobileSidebarOpen(false)}
               electionPeriod={settings.election_period}
+              isSuperAdmin={session.role === 'admin' ? !!session.isSuperAdmin : false}
+              adminUsername={session.role === 'admin' ? session.username : 'admin'}
             />
 
             {/* Admin Content Area (offset by sidebar on desktop) */}
@@ -180,7 +182,9 @@ export default function App() {
 
                 {adminMenu === 'kelas' && <ClassesManagement />}
 
-                {adminMenu === 'siswa' && <StudentsManagement />}
+                {adminMenu === 'siswa' && (
+                  <StudentsManagement isSuperAdmin={session.role === 'admin' ? !!session.isSuperAdmin : false} />
+                )}
 
                 {adminMenu === 'kandidat' && <CandidatesManagement />}
 
@@ -205,6 +209,8 @@ export default function App() {
                     onOpenSupabaseGuide={() => setIsSupabaseModalOpen(true)}
                     supabaseStatus={supabaseStatus}
                     onRefreshSupabaseStatus={checkSupabase}
+                    isSuperAdmin={session.role === 'admin' ? !!session.isSuperAdmin : false}
+                    currentAdminUsername={session.role === 'admin' ? session.username : 'admin'}
                   />
                 )}
               </div>

