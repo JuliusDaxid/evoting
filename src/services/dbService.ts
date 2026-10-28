@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { storageService, StorageBucket } from '../lib/storageService';
 import {
   BallotAuditRecord,
   Candidate,
@@ -595,52 +596,151 @@ class DatabaseService {
     }
   }
 
+  private safeSetItem(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e: any) {
+      if (e?.name === 'QuotaExceededError' || e?.code === 22 || e?.code === 1014) {
+        console.warn('Storage quota exceeded, executing emergency cleanup of oversized Base64 data...');
+        this.sanitizeLargeDataFromLocal();
+        try {
+          localStorage.setItem(key, value);
+        } catch (retryErr) {
+          console.error('SafeSetItem failed after cleanup:', retryErr);
+        }
+      } else {
+        console.warn('localStorage error:', e);
+      }
+    }
+  }
+
+  /**
+   * Cleans up oversized Base64 blobs from localStorage to prevent QuotaExceededError
+   */
+  public sanitizeLargeDataFromLocal(): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const purgeLargeDataUrl = (url?: string): string => {
+        if (url && url.startsWith('data:') && url.length > 500) {
+          return '';
+        }
+        return url || '';
+      };
+
+      // Clean candidates
+      const candStr = localStorage.getItem('eosis_candidates');
+      if (candStr && candStr.includes('data:')) {
+        const cands = JSON.parse(candStr);
+        const cleaned = cands.map((c: any) => ({
+          ...c,
+          photo_url: purgeLargeDataUrl(c.photo_url) || 'https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80',
+        }));
+        localStorage.setItem('eosis_candidates', JSON.stringify(cleaned));
+      }
+
+      // Clean settings logo
+      const setStr = localStorage.getItem('eosis_settings');
+      if (setStr && setStr.includes('data:image')) {
+        const setObj = JSON.parse(setStr);
+        if (setObj.school_logo && setObj.school_logo.length > 500 && setObj.school_logo.startsWith('data:image')) {
+          setObj.school_logo = OFFICIAL_EOSIS_LOGO_SVG;
+          localStorage.setItem('eosis_settings', JSON.stringify(setObj));
+        }
+      }
+
+      // Clean members
+      const memStr = localStorage.getItem('eosis_members');
+      if (memStr && memStr.includes('data:')) {
+        const mems = JSON.parse(memStr);
+        const cleaned = mems.map((m: any) => ({
+          ...m,
+          photo_url: purgeLargeDataUrl(m.photo_url) || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+        }));
+        localStorage.setItem('eosis_members', JSON.stringify(cleaned));
+      }
+
+      // Clean documents
+      const docStr = localStorage.getItem('eosis_documents');
+      if (docStr && docStr.includes('data:')) {
+        const docs = JSON.parse(docStr);
+        const cleaned = docs.map((d: any) => ({
+          ...d,
+          file_url: purgeLargeDataUrl(d.file_url) || 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+        }));
+        localStorage.setItem('eosis_documents', JSON.stringify(cleaned));
+      }
+    } catch (e) {
+      console.warn('Gagal membersihkan data besar di localStorage:', e);
+    }
+  }
+
   private initLocalStore() {
+    this.sanitizeLargeDataFromLocal();
+
     if (!localStorage.getItem('eosis_classes')) {
-      localStorage.setItem('eosis_classes', JSON.stringify(INITIAL_CLASSES));
+      this.safeSetItem('eosis_classes', JSON.stringify(INITIAL_CLASSES));
     }
     if (!localStorage.getItem('eosis_candidates')) {
-      localStorage.setItem('eosis_candidates', JSON.stringify(INITIAL_CANDIDATES));
+      this.safeSetItem('eosis_candidates', JSON.stringify(INITIAL_CANDIDATES));
     }
     if (!localStorage.getItem('eosis_students')) {
-      localStorage.setItem('eosis_students', JSON.stringify(INITIAL_STUDENTS));
+      this.safeSetItem('eosis_students', JSON.stringify(INITIAL_STUDENTS));
     }
     if (!localStorage.getItem('eosis_settings')) {
-      localStorage.setItem('eosis_settings', JSON.stringify(INITIAL_SETTINGS));
+      this.safeSetItem('eosis_settings', JSON.stringify(INITIAL_SETTINGS));
     } else {
       const stored = localStorage.getItem('eosis_settings');
       if (stored && (stored.includes('images.unsplash.com/photo-1546410531-bb4caa6b424d') || !JSON.parse(stored).school_logo)) {
         try {
           const parsed = JSON.parse(stored);
           parsed.school_logo = OFFICIAL_EOSIS_LOGO_SVG;
-          localStorage.setItem('eosis_settings', JSON.stringify(parsed));
+          this.safeSetItem('eosis_settings', JSON.stringify(parsed));
         } catch {}
       }
     }
     if (!localStorage.getItem('eosis_members')) {
-      localStorage.setItem('eosis_members', JSON.stringify(INITIAL_OSIS_MEMBERS));
+      this.safeSetItem('eosis_members', JSON.stringify(INITIAL_OSIS_MEMBERS));
     }
     if (!localStorage.getItem('eosis_programs')) {
-      localStorage.setItem('eosis_programs', JSON.stringify(INITIAL_OSIS_PROGRAMS));
+      this.safeSetItem('eosis_programs', JSON.stringify(INITIAL_OSIS_PROGRAMS));
     }
     if (!localStorage.getItem('eosis_meetings')) {
-      localStorage.setItem('eosis_meetings', JSON.stringify(INITIAL_OSIS_MEETINGS));
+      this.safeSetItem('eosis_meetings', JSON.stringify(INITIAL_OSIS_MEETINGS));
     }
     if (!localStorage.getItem('eosis_attendance')) {
-      localStorage.setItem('eosis_attendance', JSON.stringify(INITIAL_OSIS_ATTENDANCE));
+      this.safeSetItem('eosis_attendance', JSON.stringify(INITIAL_OSIS_ATTENDANCE));
     }
     if (!localStorage.getItem('eosis_documents')) {
-      localStorage.setItem('eosis_documents', JSON.stringify(INITIAL_OSIS_DOCUMENTS));
+      this.safeSetItem('eosis_documents', JSON.stringify(INITIAL_OSIS_DOCUMENTS));
     }
     if (!localStorage.getItem('eosis_ballot_audit')) {
-      localStorage.setItem('eosis_ballot_audit', JSON.stringify(INITIAL_BALLOT_AUDIT));
+      this.safeSetItem('eosis_ballot_audit', JSON.stringify(INITIAL_BALLOT_AUDIT));
     }
     if (!localStorage.getItem('eosis_changelog')) {
-      localStorage.setItem('eosis_changelog', JSON.stringify(INITIAL_CHANGELOG));
+      this.safeSetItem('eosis_changelog', JSON.stringify(INITIAL_CHANGELOG));
     }
     if (!localStorage.getItem('eosis_credits')) {
-      localStorage.setItem('eosis_credits', JSON.stringify(INITIAL_CREDITS));
+      this.safeSetItem('eosis_credits', JSON.stringify(INITIAL_CREDITS));
     }
+  }
+
+  // ==========================================
+  // SUPABASE STORAGE UPLOADS (NO LOCAL STORAGE BLOAT)
+  // ==========================================
+  async uploadCandidatePhoto(file: File): Promise<{ success: boolean; publicUrl: string; error?: string }> {
+    return storageService.uploadFile(file, 'candidates');
+  }
+
+  async uploadSchoolLogo(file: File): Promise<{ success: boolean; publicUrl: string; error?: string }> {
+    return storageService.uploadFile(file, 'assets');
+  }
+
+  async uploadMemberPhoto(file: File): Promise<{ success: boolean; publicUrl: string; error?: string }> {
+    return storageService.uploadFile(file, 'members');
+  }
+
+  async uploadDocumentFile(file: File): Promise<{ success: boolean; publicUrl: string; error?: string }> {
+    return storageService.uploadFile(file, 'archives');
   }
 
   async checkSupabaseConnection(): Promise<{ isConnected: boolean; tablesFound: boolean; message: string }> {

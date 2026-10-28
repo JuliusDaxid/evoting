@@ -396,24 +396,44 @@ END $$;
 NOTIFY pgrst, 'reload schema';
 
 -- ==============================================================================
--- SEED DATA AWAL CONTOH (Hanya disisipkan jika belum ada data)
+-- 11. SUPABASE STORAGE BUCKETS (SOLUSI RESMI ANTI-ERROR KUOTA PENUH LOCALSTORAGE)
 -- ==============================================================================
-INSERT INTO public.classes (name, description) VALUES
-('VII A', 'Kelas 7 Unggulan Akademik'),
-('VII B', 'Kelas 7 Reguler'),
-('VIII A', 'Kelas 8 Unggulan'),
-('VIII B', 'Kelas 8 Reguler'),
-('IX A', 'Kelas 9 Persiapan Ujian'),
-('IX B', 'Kelas 9 Reguler')
-ON CONFLICT (name) DO NOTHING;
+-- Membuat 4 bucket penyimpanan file publik di cloud Supabase:
+-- 1) candidates : Foto pasangan calon ketua & wakil ketua OSIS
+-- 2) assets     : Logo sekolah dan logo resmi eOSIS
+-- 3) members    : Foto profil pengurus & pembina OSIS
+-- 4) archives   : Dokumen arsip kegiatan OSIS (PDF, DOCX, XLSX, Gambar)
 
-INSERT INTO public.osis_members (id, name, role, sekbid, level, class_name, phone, photo_url, period) VALUES
-('a1111111-1111-1111-1111-111111111101', 'Drs. Hendro Wibowo, M.Pd.', 'Pembina OSIS', 'Kesiswaan', 1, 'Dewan Guru', '081234567890', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=300&q=80', 'Masa Bakti 2026/2027'),
-('a1111111-1111-1111-1111-111111111102', 'Muhammad Farhan Pratama', 'Ketua Umum OSIS', 'Inti', 2, 'VIII A', '081398765432', 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=300&q=80', 'Masa Bakti 2026/2027'),
-('a1111111-1111-1111-1111-111111111103', 'Alya Siti Nurhaliza', 'Wakil Ketua OSIS', 'Inti', 3, 'VIII B', '081287654321', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80', 'Masa Bakti 2026/2027'),
-('a1111111-1111-1111-1111-111111111104', 'Zahra Cantika Putri', 'Sekretaris Umum', 'Inti', 4, 'VIII A', '081578901234', 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=300&q=80', 'Masa Bakti 2026/2027'),
-('a1111111-1111-1111-1111-111111111105', 'Bima Sakti Nugraha', 'Bendahara Umum', 'Inti', 4, 'VIII B', '081890123456', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80', 'Masa Bakti 2026/2027')
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES
+  ('candidates', 'candidates', true, 10485760, ARRAY['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']),
+  ('assets', 'assets', true, 10485760, ARRAY['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']),
+  ('members', 'members', true, 10485760, ARRAY['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']),
+  ('archives', 'archives', true, 52428800, NULL)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Kebijakan Akses Penuh (RLS) untuk 4 Bucket Cloud Storage eOSIS
+DROP POLICY IF EXISTS "Allow public read candidates storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public upload candidates storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public update candidates storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public read assets storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public upload assets storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public update assets storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public read members storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public upload members storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public update members storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public read archives storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public upload archives storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public update archives storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public delete archives storage" ON storage.objects;
+DROP POLICY IF EXISTS "Enable all access for eosis storage" ON storage.objects;
+
+CREATE POLICY "Enable all access for eosis storage"
+ON storage.objects
+FOR ALL
+TO public
+USING (bucket_id IN ('candidates', 'assets', 'members', 'archives'))
+WITH CHECK (bucket_id IN ('candidates', 'assets', 'members', 'archives'));
 `;
 
   const copyToClipboard = () => {
@@ -467,9 +487,9 @@ ON CONFLICT (id) DO NOTHING;
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl text-blue-900 flex items-start gap-3">
             <i className="bi bi-info-circle-fill text-blue-600 text-xl mt-0.5"></i>
             <div>
-              <h4 className="font-semibold text-sm mb-1">Informasi Setup Supabase</h4>
+              <h4 className="font-semibold text-sm mb-1">Informasi Setup Supabase Database &amp; Storage</h4>
               <p className="text-xs text-blue-800 leading-relaxed">
-                Skrip ini mencakup tabel pemilihan OSIS (kelas, siswa, kandidat, settings) dan modul internal pengurus OSIS (struktur organisasi, proja tracker, presensi kegiatan, dan e-archive dokumen).
+                Skrip ini mencakup seluruh tabel pemilihan OSIS (kelas, siswa, kandidat, settings), modul internal pengurus (struktur organisasi, proja tracker, presensi kegiatan, e-archive dokumen), serta <strong>4 Supabase Storage Buckets</strong> (<code className="bg-blue-100 px-1 py-0.5 rounded font-mono">candidates</code>, <code className="bg-blue-100 px-1 py-0.5 rounded font-mono">assets</code>, <code className="bg-blue-100 px-1 py-0.5 rounded font-mono">members</code>, <code className="bg-blue-100 px-1 py-0.5 rounded font-mono">archives</code>) agar berkas fisik disimpan di cloud Supabase dan bebas dari error kuota penuh localStorage browser.
               </p>
             </div>
           </div>

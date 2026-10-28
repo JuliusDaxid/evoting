@@ -233,16 +233,37 @@ export const SettingsView: React.FC<Props> = ({
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoUploadSuccess, setLogoUploadSuccess] = useState<string | null>(null);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setSchoolLogo(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      setStatusMessage({ text: 'Ukuran berkas logo maksimal 10 MB.', isError: true });
+      return;
+    }
+
+    setUploadingLogo(true);
+    setLogoUploadSuccess(null);
+    setStatusMessage(null);
+
+    try {
+      const res = await dbService.uploadSchoolLogo(file);
+      if (res.success && res.publicUrl) {
+        setSchoolLogo(res.publicUrl);
+        setLogoUploadSuccess('Logo berhasil diunggah langsung ke Supabase Storage (bucket: assets)!');
+        setStatusMessage({ text: 'Logo sekolah berhasil diunggah ke Supabase Storage (bucket: assets)!', isError: false });
+      } else {
+        throw new Error(res.error || 'Gagal mengunggah logo ke Supabase Storage');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunggah logo ke cloud storage';
+      setStatusMessage({ text: msg, isError: true });
+    } finally {
+      setUploadingLogo(false);
+      e.target.value = '';
     }
   };
 
@@ -438,9 +459,10 @@ export const SettingsView: React.FC<Props> = ({
             {/* Logo Input */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
-                <span>Logo Sekolah / eOSIS (Upload File atau URL)</span>
-                <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
-                  <i className="bi bi-shield-check"></i> Selalu Tampil (Auto Fallback)
+                <span>Logo Sekolah / eOSIS</span>
+                <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200">
+                  <i className="bi bi-cloud-arrow-up-fill me-1"></i>
+                  Supabase Storage: bucket <code>assets</code>
                 </span>
               </label>
               <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
@@ -454,20 +476,36 @@ export const SettingsView: React.FC<Props> = ({
                       type="text"
                       value={schoolLogo}
                       onChange={(e) => setSchoolLogo(e.target.value)}
-                      placeholder="https://... URL logo (atau klik upload)"
+                      placeholder="https://... URL logo (atau unggah berkas ke cloud)"
                       className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono"
                     />
-                    <label className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl cursor-pointer text-xs font-bold flex items-center gap-1.5 transition">
-                      <i className="bi bi-upload"></i>
-                      <span>Upload File</span>
+                    <label className={`px-3.5 py-2 ${uploadingLogo ? 'bg-blue-100 text-blue-700' : 'bg-blue-50 hover:bg-blue-100 text-blue-700'} border border-blue-200 rounded-xl cursor-pointer text-xs font-bold flex items-center gap-1.5 transition shrink-0`}>
+                      {uploadingLogo ? (
+                        <>
+                          <i className="bi bi-arrow-repeat animate-spin text-blue-600"></i>
+                          <span>Mengunggah...</span>
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-cloud-upload"></i>
+                          <span>Upload File</span>
+                        </>
+                      )}
                       <input
                         type="file"
                         accept="image/*"
+                        disabled={uploadingLogo}
                         onChange={handleLogoUpload}
                         className="hidden"
                       />
                     </label>
                   </div>
+                  {logoUploadSuccess && (
+                    <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
+                      <i className="bi bi-check-circle-fill"></i>
+                      <span>{logoUploadSuccess}</span>
+                    </p>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button

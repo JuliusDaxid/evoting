@@ -67,16 +67,28 @@ export const OsisMembersView: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setPhotoUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    setUploadingPhoto(true);
+    setFormError(null);
+    try {
+      const res = await dbService.uploadMemberPhoto(file);
+      if (res.success && res.publicUrl) {
+        setPhotoUrl(res.publicUrl);
+      } else {
+        throw new Error(res.error || 'Gagal mengunggah foto ke Cloud Storage');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunggah foto pengurus ke Cloud Storage';
+      setFormError(`Upload foto gagal: ${msg}`);
+    } finally {
+      setUploadingPhoto(false);
+      // Reset input agar bisa re-upload file dengan nama yang sama jika diperlukan
+      e.target.value = '';
     }
   };
 
@@ -656,28 +668,46 @@ export const OsisMembersView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Foto Profil (URL atau Upload)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">
+                    Foto Profil (Cloud Storage)
+                  </label>
+                  <span className="text-[10px] text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md font-mono">
+                    <i className="bi bi-cloud-arrow-up mr-1"></i>bucket: members
+                  </span>
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={photoUrl}
                     onChange={(e) => setPhotoUrl(e.target.value)}
-                    placeholder="https://... atau upload file di samping"
+                    placeholder="https://... atau klik upload file"
                     className="flex-1 px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-[11px]"
                   />
-                  <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer font-bold flex items-center gap-1">
-                    <i className="bi bi-upload"></i>
-                    <span>Upload</span>
+                  <label className={`px-3 py-2 ${uploadingPhoto ? 'bg-blue-100 text-blue-700 cursor-not-allowed' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer'} rounded-xl font-bold flex items-center gap-1.5 transition shrink-0`}>
+                    {uploadingPhoto ? (
+                      <>
+                        <i className="bi bi-arrow-repeat animate-spin"></i>
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="bi bi-cloud-upload"></i>
+                        <span>Upload File</span>
+                      </>
+                    )}
                     <input
                       type="file"
                       accept="image/*"
+                      disabled={uploadingPhoto}
                       onChange={handlePhotoUpload}
                       className="hidden"
                     />
                   </label>
                 </div>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  File gambar otomatis diunggah langsung ke Supabase Storage (bukan localStorage) untuk menghemat memori browser.
+                </p>
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">

@@ -80,16 +80,36 @@ export const CandidatesManagement: React.FC = () => {
     setMissionItems(updated);
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadSuccessMessage, setUploadSuccessMessage] = useState<string | null>(null);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setPhotoUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      setFormError('Ukuran berkas foto maksimal 10 MB.');
+      return;
+    }
+
+    setUploadingPhoto(true);
+    setFormError(null);
+    setUploadSuccessMessage(null);
+
+    try {
+      const res = await dbService.uploadCandidatePhoto(file);
+      if (res.success && res.publicUrl) {
+        setPhotoUrl(res.publicUrl);
+        setUploadSuccessMessage('Foto berhasil diunggah langsung ke Supabase Storage (bucket: candidates)!');
+      } else {
+        throw new Error(res.error || 'Gagal mengunggah foto ke Supabase Storage');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunggah foto ke Supabase Storage';
+      setFormError(msg);
+    } finally {
+      setUploadingPhoto(false);
+      e.target.value = '';
     }
   };
 
@@ -382,30 +402,55 @@ export const CandidatesManagement: React.FC = () => {
                 </div>
               </div>
 
-              {/* Photo Input (URL or File) */}
+              {/* Photo Input (URL or Supabase Storage Upload) */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Foto Pasangan Calon (URL atau Upload)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">
+                    Foto Pasangan Calon
+                  </label>
+                  <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200">
+                    <i className="bi bi-cloud-arrow-up-fill me-1"></i>
+                    Supabase Storage: bucket <code>candidates</code>
+                  </span>
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={photoUrl}
                     onChange={(e) => setPhotoUrl(e.target.value)}
-                    placeholder="https://... atau pilih upload file di kanan"
+                    placeholder="https://... URL foto atau unggah berkas fisik ke cloud"
                     className="flex-1 px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-[11px]"
                   />
-                  <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer font-bold flex items-center gap-1">
-                    <i className="bi bi-upload"></i>
-                    <span>Upload</span>
+                  <label className={`px-3.5 py-2 ${uploadingPhoto ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-xl cursor-pointer font-bold flex items-center gap-1.5 transition shrink-0`}>
+                    {uploadingPhoto ? (
+                      <>
+                        <i className="bi bi-arrow-repeat animate-spin text-blue-600"></i>
+                        <span>Mengunggah...</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="bi bi-cloud-upload text-blue-600"></i>
+                        <span>Pilih Foto</span>
+                      </>
+                    )}
                     <input
                       type="file"
                       accept="image/*"
+                      disabled={uploadingPhoto}
                       onChange={handlePhotoUpload}
                       className="hidden"
                     />
                   </label>
                 </div>
+                {uploadSuccessMessage && (
+                  <p className="text-[11px] text-emerald-600 font-medium mt-1 flex items-center gap-1">
+                    <i className="bi bi-check-circle-fill"></i>
+                    <span>{uploadSuccessMessage}</span>
+                  </p>
+                )}
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  Foto disimpan langsung ke Supabase Storage, bukan ke memori browser sehingga bebas dari limit kuota.
+                </span>
               </div>
 
               {/* Vision */}

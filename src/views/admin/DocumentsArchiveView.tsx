@@ -69,24 +69,46 @@ export const DocumentsArchiveView: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const sizeInMB = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
-      setFileSize(sizeInMB);
-      const name = file.name.toLowerCase();
-      if (name.endsWith('.pdf')) setFileType('pdf');
-      else if (name.endsWith('.doc') || name.endsWith('.docx')) setFileType('docx');
-      else if (name.endsWith('.xls') || name.endsWith('.xlsx')) setFileType('xlsx');
-      else if (name.match(/\.(png|jpe?g|webp)$/)) setFileType('image');
+  const [uploadingFile, setUploadingFile] = useState(false);
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setFileUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Hitung ukuran file dalam MB atau KB
+    const sizeInMB = file.size > 1024 * 1024 
+      ? (file.size / (1024 * 1024)).toFixed(1) + ' MB'
+      : Math.max(1, Math.round(file.size / 1024)) + ' KB';
+    setFileSize(sizeInMB);
+
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.pdf')) setFileType('pdf');
+    else if (name.endsWith('.doc') || name.endsWith('.docx')) setFileType('docx');
+    else if (name.endsWith('.xls') || name.endsWith('.xlsx')) setFileType('xlsx');
+    else if (name.match(/\.(png|jpe?g|webp|gif)$/)) setFileType('image');
+
+    // Jika judul masih kosong, isi otomatis dari nama berkas
+    if (!title.trim()) {
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+      setTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
+    }
+
+    setUploadingFile(true);
+    setFormError(null);
+    try {
+      const res = await dbService.uploadDocumentFile(file);
+      if (res.success && res.publicUrl) {
+        setFileUrl(res.publicUrl);
+      } else {
+        throw new Error(res.error || 'Gagal mengunggah berkas ke Cloud Storage');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunggah berkas ke Cloud Storage';
+      setFormError(`Upload gagal: ${msg}`);
+    } finally {
+      setUploadingFile(false);
+      // Reset input agar bisa re-upload file dengan nama yang sama jika diperlukan
+      e.target.value = '';
     }
   };
 
@@ -523,28 +545,46 @@ export const DocumentsArchiveView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Berkas File (Upload atau Masukkan Link / URL)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">
+                    Berkas Dokumen (Cloud Storage)
+                  </label>
+                  <span className="text-[10px] text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md font-mono">
+                    <i className="bi bi-cloud-arrow-up mr-1"></i>bucket: archives
+                  </span>
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={fileUrl}
                     onChange={(e) => setFileUrl(e.target.value)}
-                    placeholder="https://... atau pilih upload file"
+                    placeholder="https://... atau klik Pilih Berkas"
                     required
                     className="flex-1 px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono text-[11px]"
                   />
-                  <label className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer font-bold flex items-center gap-1.5 shrink-0">
-                    <i className="bi bi-upload"></i>
-                    <span>Pilih Berkas</span>
+                  <label className={`px-3.5 py-2 ${uploadingFile ? 'bg-blue-100 text-blue-700 cursor-not-allowed' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer'} rounded-xl font-bold flex items-center gap-1.5 shrink-0 transition`}>
+                    {uploadingFile ? (
+                      <>
+                        <i className="bi bi-arrow-repeat animate-spin"></i>
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="bi bi-cloud-upload"></i>
+                        <span>Pilih Berkas</span>
+                      </>
+                    )}
                     <input
                       type="file"
+                      disabled={uploadingFile}
                       onChange={handleFileUpload}
                       className="hidden"
                     />
                   </label>
                 </div>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Berkas fisik (PDF, Word, Excel, Gambar) langsung disimpan di Supabase Cloud Storage. Tidak membebani memori lokal (bebas error kuota penuh).
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
